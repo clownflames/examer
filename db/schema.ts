@@ -465,13 +465,15 @@ export const teamFinalResult = pgTable(
 
 // ---------- AUTH ----------
 
-export const userRelations = relations(user, ({ many }) => ({
+export const userRelations = relations(user, ({ many, one }) => ({
   sessions: many(session),
   accounts: many(account),
   internshipRegistrations: many(internshipRegistration),
   examSubmissions: many(examSubmission),
-  teamMemberships: many(teamMember), // NEW
+  teamMemberships: many(teamMember),
+  payments: many(payments),
   messages: many(messages),
+  profile: one(profile), // ← add
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -518,17 +520,23 @@ export const internshipsRelations = relations(
 
 export const internshipRegistrationRelations = relations(
   internshipRegistration,
+  
   ({ one }) => ({
     user: one(user, {
       fields: [internshipRegistration.userId],
       references: [user.id],
     }),
 
+    
+
     internship: one(internships, {
       fields: [internshipRegistration.internshipId],
       references: [internships.id],
     }),
   }),
+
+
+  
 );
 
 // ---------- EXAMS ----------
@@ -746,3 +754,148 @@ export const messagesRelations = relations(messages, ({ one }) => ({
     references: [user.id],
   }),
 }));
+
+
+
+export const profile = pgTable(
+  "profile",
+  {
+    id: text("id").primaryKey(),
+
+    userId: text("user_id")
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: "cascade" }),
+
+    // Basic
+    headline: text("headline"), // e.g. "Full Stack Developer | Final year CSE"
+    bio: text("bio"),
+    phone: text("phone"),
+
+    // Education
+    collegeName: text("college_name"),
+    universityName: text("university_name"),
+    degree: text("degree"), // e.g. "B.Tech Computer Science"
+    branch: text("branch"), // e.g. "CSE"
+    rollNumber: text("roll_number"),
+    graduationYear: integer("graduation_year"),
+    cgpa: numeric("cgpa", { precision: 4, scale: 2 }),
+
+    // Address / Location
+    city: text("city"),
+    state: text("state"),
+    country: text("country").default("India"),
+    pincode: text("pincode"),
+
+    // Links
+    githubUrl: text("github_url"),
+    linkedinUrl: text("linkedin_url"),
+    portfolioUrl: text("portfolio_url"),
+    twitterUrl: text("twitter_url"),
+
+    // Skills — jsonb array of strings
+    skills: jsonb("skills").$type<string[]>().default([]),
+
+    // Languages known — jsonb array
+    languages: jsonb("languages").$type<string[]>().default([]),
+
+    // Experience — jsonb array of objects
+    // [{ company, role, duration, description }]
+    experience: jsonb("experience")
+      .$type<
+        {
+          company: string;
+          role: string;
+          duration: string;
+          description?: string;
+        }[]
+      >()
+      .default([]),
+
+    // Projects — jsonb array of objects
+    // [{ name, description, link, techStack }]
+    projects: jsonb("projects")
+      .$type<
+        {
+          name: string;
+          description?: string;
+          link?: string;
+          techStack?: string[];
+        }[]
+      >()
+      .default([]),
+
+    // Achievements / Certifications — jsonb array
+    achievements: jsonb("achievements").$type<string[]>().default([]),
+
+    // Resume
+    resumeUrl: text("resume_url"),
+
+    // Meta
+    isPublic: boolean("is_public").default(true).notNull(),
+    profileCompletion: integer("profile_completion").default(0).notNull(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [index("profile_user_id_idx").on(table.userId)]
+);
+
+// Relations
+export const profileRelations = relations(profile, ({ one }) => ({
+  user: one(user, {
+    fields: [profile.userId],
+    references: [user.id],
+  }),
+}));
+
+
+
+
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "pending",
+  "paid",
+  "failed",
+]);
+
+export const payments = pgTable("payments", {
+  id: text("id").primaryKey(),
+  
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  
+  registrationId: text("registration_id")
+    .notNull()
+    .references(() => internshipRegistration.id, { onDelete: "cascade" }),
+  
+  internshipId: text("internship_id")
+    .notNull()
+    .references(() => internships.id, { onDelete: "cascade" }),
+  
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").default("INR").notNull(),
+  
+  status: paymentStatusEnum("status").default("pending").notNull(),
+  
+  razorpayOrderId: text("razorpay_order_id"),
+  razorpayPaymentId: text("razorpay_payment_id"),
+  razorpaySignature: text("razorpay_signature"),
+  
+  failureReason: text("failure_reason"),
+  
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+}, (table) => [
+  index("payments_user_id_idx").on(table.userId),
+  index("payments_registration_id_idx").on(table.registrationId),
+  index("payments_internship_id_idx").on(table.internshipId),
+  index("payments_razorpay_order_id_idx").on(table.razorpayOrderId),
+]);
