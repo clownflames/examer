@@ -603,7 +603,7 @@ export default function ApplyDrawer({
                         About
                       </h3>
                       <div
-                        className="tiptap text-sm text-foreground/80 leading-relaxed"
+                        className="rich-text text-sm text-foreground/80 leading-relaxed"
                         dangerouslySetInnerHTML={{
                           __html: internship.description,
                         }}
@@ -1012,7 +1012,7 @@ export default function ApplyDrawer({
 
                                     {exam.description && (
                                       <div
-                                        className="tiptap text-xs text-muted-foreground line-clamp-2 mb-2"
+                                        className="rich-text text-xs text-muted-foreground line-clamp-2 mb-2"
                                         dangerouslySetInnerHTML={{
                                           __html: exam.description,
                                         }}

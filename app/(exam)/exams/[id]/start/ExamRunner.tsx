@@ -372,13 +372,13 @@ export default function ExamRunner({ exam }: { exam: ExamForAttempt }) {
 
             <div className="p-5 space-y-5">
               <div
-                className="tiptap text-sm text-foreground/90 leading-relaxed"
+                className="rich-text text-sm text-foreground/90 leading-relaxed"
                 dangerouslySetInnerHTML={{ __html: current.name }}
               />
 
               {current.details && (
                 <div
-                  className="tiptap text-sm text-muted-foreground leading-relaxed border-l-2 border-border pl-3"
+                  className="rich-text text-sm text-muted-foreground leading-relaxed border-l-2 border-border pl-3"
                   dangerouslySetInnerHTML={{ __html: current.details }}
                 />
               )}
@@ -639,10 +639,7 @@ function AnswerArea({
                 {selected ? <CheckCircle2 className="w-3 h-3" /> : i + 1}
               </span>
               <span
-                className={cn(
-                  "tiptap",
-                  selected ? "text-foreground" : "text-foreground/85"
-                )}
+                className="rich-text flex-1 min-w-0 break-words"
                 dangerouslySetInnerHTML={{ __html: opt.labelText }}
               />
             </button>
@@ -843,7 +840,7 @@ function ResultView({
                     {i + 1}.
                   </span>
                   <div
-                    className="tiptap text-sm flex-1 min-w-0"
+                    className="rich-text text-sm flex-1 min-w-0"
                     dangerouslySetInnerHTML={{ __html: q.questionName }}
                   />
                   {q.isCorrect === true ? (
@@ -860,7 +857,7 @@ function ResultView({
                     <span className="font-medium text-foreground/70">Your answer: </span>
                     {q.yourAnswer ? (
                       <span
-                        className="tiptap"
+                        className="rich-text"
                         dangerouslySetInnerHTML={{ __html: q.yourAnswer }}
                       />
                     ) : (
@@ -873,7 +870,7 @@ function ResultView({
                         Correct answer:{" "}
                       </span>
                       <span
-                        className="tiptap text-emerald-500"
+                        className="rich-text text-emerald-500"
                         dangerouslySetInnerHTML={{ __html: q.correctAnswer }}
                       />
                     </p>

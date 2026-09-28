@@ -128,7 +128,7 @@ export default function DemandDetailDrawer({
                       About this track
                     </h3>
                     <div
-                      className="tiptap text-sm text-foreground/80 leading-relaxed"
+                      className="rich-text text-sm text-foreground/80 leading-relaxed"
                       dangerouslySetInnerHTML={{ __html: data.description }}
                     />
                   </div>

@@ -617,7 +617,7 @@ function MessageCard({
             </div>
           ) : (
             <div
-              className="tiptap prose prose-sm dark:prose-invert max-w-none text-sm"
+                  className="rich-text prose prose-sm dark:prose-invert max-w-none text-sm"
               dangerouslySetInnerHTML={{ __html: message.text ?? "" }}
             />
           )}
