@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
-import { ArrowUpRight, Sparkles, Loader2, Inbox } from "lucide-react";
+import { ArrowUpRight, Sparkles, Inbox } from "lucide-react";
 import { getInternships, type InternshipListItem } from "../actions";
 import ApplyDrawer from "./ApplyDrawer";
 import { useSession } from "@/lib/auth-client";
@@ -67,27 +67,26 @@ export default function HeroSection() {
   const isLoggedIn = !!session?.user;
 
   const [data, setData] = useState<InternshipListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const [selected, setSelected] = useState<InternshipListItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  const load = useCallback(() => {
+    startTransition(async () => {
+      const res = await getInternships();
+      setData(res);
+      setHasLoaded(true);
+    });
+  }, []);
+
   useEffect(() => {
     if (sessionLoading) return;
+    load();
+  }, [sessionLoading, session?.user?.id, load]);
 
-    let mounted = true;
-    setLoading(true);
-
-    getInternships().then((res) => {
-      if (mounted) {
-        setData(res);
-        setLoading(false);
-      }
-    });
-
-    return () => {
-      mounted = false;
-    };
-  }, [sessionLoading, session?.user?.id]);
+  // Skeleton only while there is genuinely nothing to show yet.
+  const loading = sessionLoading || isPending || !hasLoaded;
 
   const openDrawer = (intern: InternshipListItem) => {
     setSelected(intern);
@@ -124,7 +123,7 @@ export default function HeroSection() {
 
               <p className="mt-4 text-sm md:text-base text-muted-foreground max-w-md">
                 Hand-picked opportunities from top companies, tailored to
-                what you're actually good at.
+                what you&apos;re actually good at.
               </p>
             </motion.div>
 
@@ -270,15 +269,20 @@ export default function HeroSection() {
                 demandName: selected.demandName,
                 demandIconUrl: selected.demandIconUrl,
                 description: selected.description,
+                jdUrl: selected.jdUrl,
                 startDate: selected.startDate,
                 endDate: selected.endDate,
                 lastSubmissionDate: selected.lastSubmissionDate,
                 sellingPrice: selected.sellingPrice,
                 price: selected.price,
+                totalScore: selected.totalScore,
+                examinerName: selected.examinerName,
+                examinerPhotoUrl: selected.examinerPhotoUrl,
               }
             : null
         }
         isLoggedIn={isLoggedIn}
+        onPaid={load}
       />
     </section>
   );

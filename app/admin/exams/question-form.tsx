@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import * as React from 'react'
 import {
@@ -6,6 +6,7 @@ import {
   Controller,
   useFieldArray,
   useWatch,
+  type Resolver,
 } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -118,7 +119,7 @@ export function QuestionForm({
   const [codeLang, setCodeLang] = React.useState('javascript')
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(clientSchema),
+    resolver: zodResolver(clientSchema) as Resolver<FormValues>,
     defaultValues: {
       name: initial?.name ?? '',
       type: initial?.type ?? 'mcq',
@@ -243,7 +244,7 @@ export function QuestionForm({
                 <Input
                   {...field}
                   id="q-name"
-                  placeholder="Type the question…"
+                  placeholder="Type the question”¦"
                   value={field.value ?? ''}
                   autoFocus
                 />
@@ -380,7 +381,7 @@ export function QuestionForm({
                 <Input
                   {...field}
                   id="q-defaultText"
-                  placeholder="Shown as a hint or reference answer…"
+                  placeholder="Shown as a hint or reference answer”¦"
                   value={field.value ?? ''}
                 />
                 <FieldDescription>
@@ -451,7 +452,7 @@ export function QuestionForm({
                 onChange={field.onChange}
                 onBlur={field.onBlur}
                 minHeight="120px"
-                placeholder="Add instructions, hints, or extra context for this question…"
+                placeholder="Add instructions, hints, or extra context for this question”¦"
               />
               <FieldDescription>Optional.</FieldDescription>
               {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
@@ -476,8 +477,8 @@ export function QuestionForm({
         <Button type="submit" disabled={submitting}>
           {submitting
             ? isEdit
-              ? 'Saving…'
-              : 'Creating…'
+              ? 'Saving”¦'
+              : 'Creating”¦'
             : isEdit
               ? 'Save Changes'
               : 'Add Question'}
@@ -499,7 +500,12 @@ function LanguageSelect({
   onChange: (v: string) => void
 }) {
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select
+      value={value}
+      onValueChange={(v) => {
+        if (v) onChange(v)
+      }}
+    >
       <SelectTrigger className="h-7 w-[140px] text-xs">
         <SelectValue />
       </SelectTrigger>

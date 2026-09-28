@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
       {
         protocol:"https",
         hostname:"logo.clearbit.com"
+      },
+      {
+        protocol:"http",
+        hostname:"localhost"
       }
     ]
   }

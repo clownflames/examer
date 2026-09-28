@@ -1,7 +1,7 @@
-'use client'
+﻿'use client'
 
 import * as React from 'react'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
@@ -85,7 +85,7 @@ export function ExamDrawerForm({
   const [loading, setLoading] = React.useState(mode === 'edit')
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(clientSchema),
+    resolver: zodResolver(clientSchema) as Resolver<FormValues>,
     defaultValues: {
       internshipId: '',
       orderNo: 1,
@@ -195,7 +195,7 @@ export function ExamDrawerForm({
 
   if (loading) {
     return (
-      <p className="text-muted-foreground text-sm">Loading exam…</p>
+      <p className="text-muted-foreground text-sm">Loading exam”¦</p>
     )
   }
 
@@ -300,7 +300,7 @@ export function ExamDrawerForm({
                 onChange={field.onChange}
                 onBlur={field.onBlur}
                 minHeight="140px"
-                placeholder="Describe what this exam covers, rules, and instructions…"
+                placeholder="Describe what this exam covers, rules, and instructions”¦"
               />
               <FieldDescription>
                 Supports bold, lists, links, and headings.
@@ -430,8 +430,8 @@ export function ExamDrawerForm({
         <Button type="submit" disabled={submitting}>
           {submitting
             ? mode === 'create'
-              ? 'Creating…'
-              : 'Saving…'
+              ? 'Creating”¦'
+              : 'Saving”¦'
             : mode === 'create'
               ? 'Create Exam'
               : 'Save Changes'}

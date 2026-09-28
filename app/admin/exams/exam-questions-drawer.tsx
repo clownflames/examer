@@ -233,18 +233,20 @@ function DeleteQuestionButton({
 
   return (
     <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          aria-label="Delete question"
-          disabled={pending}
-        >
-          <Trash2 className="text-destructive h-3.5 w-3.5" />
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label="Delete question"
+            disabled={pending}
+          >
+            <Trash2 className="text-destructive h-3.5 w-3.5" />
+          </Button>
+        }
+      />
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this question?</AlertDialogTitle>

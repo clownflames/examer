@@ -19,6 +19,10 @@ import {
   Sparkles,
   Users,
   TrendingUp,
+  ReceiptIndianRupee,
+  CheckCircle2,
+  Clock,
+  XCircle,
 } from "lucide-react";
 import { FaGithub as Github, FaLinkedin as  Linkedin, FaTwitter as Twitter } from "react-icons/fa";
 
@@ -32,6 +36,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { ProfileData } from "./actions";
+import type { MyPayment } from "../actions";
 import EditProfileDrawer from "./EditProfileDrawer";
 
 // =====================================================
@@ -64,11 +69,17 @@ function SectionHeading({
 // =====================================================
 export default function ProfilePageClient({
   initialData,
+  payments,
 }: {
   initialData: ProfileData;
+  payments: MyPayment[];
 }) {
   const [data, setData] = useState(initialData);
   const [editOpen, setEditOpen] = useState(false);
+
+  const paidTotal = payments
+    .filter((p) => p.status === "paid")
+    .reduce((sum, p) => sum + p.amount, 0);
 
   const hasAnyInfo =
     data.headline ||
@@ -203,6 +214,7 @@ export default function ProfilePageClient({
             <TabsTrigger value="education">Education</TabsTrigger>
             <TabsTrigger value="experience">Experience</TabsTrigger>
             <TabsTrigger value="projects">Projects</TabsTrigger>
+            <TabsTrigger value="payments">Payments</TabsTrigger>
           </TabsList>
 
           {/* ABOUT */}
@@ -273,36 +285,68 @@ export default function ProfilePageClient({
               </CardHeader>
               <CardContent className="flex flex-wrap gap-2">
                 {data.githubUrl && (
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={data.githubUrl} target="_blank" rel="noopener noreferrer">
-                      <Github className="w-4 h-4" />
-                      GitHub
-                    </a>
-                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={
+                      <a
+                        href={data.githubUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Github className="w-4 h-4" />
+                        GitHub
+                      </a>
+                    }
+                  />
                 )}
                 {data.linkedinUrl && (
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={data.linkedinUrl} target="_blank" rel="noopener noreferrer">
-                      <Linkedin className="w-4 h-4" />
-                      LinkedIn
-                    </a>
-                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={
+                      <a
+                        href={data.linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Linkedin className="w-4 h-4" />
+                        LinkedIn
+                      </a>
+                    }
+                  />
                 )}
                 {data.portfolioUrl && (
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={data.portfolioUrl} target="_blank" rel="noopener noreferrer">
-                      <Globe className="w-4 h-4" />
-                      Portfolio
-                    </a>
-                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={
+                      <a
+                        href={data.portfolioUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Globe className="w-4 h-4" />
+                        Portfolio
+                      </a>
+                    }
+                  />
                 )}
                 {data.twitterUrl && (
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={data.twitterUrl} target="_blank" rel="noopener noreferrer">
-                      <Twitter className="w-4 h-4" />
-                      Twitter
-                    </a>
-                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={
+                      <a
+                        href={data.twitterUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Twitter className="w-4 h-4" />
+                        Twitter
+                      </a>
+                    }
+                  />
                 )}
                 {!data.githubUrl && !data.linkedinUrl && !data.portfolioUrl && !data.twitterUrl && (
                   <EmptyText text="No links added" />
@@ -419,6 +463,56 @@ export default function ProfilePageClient({
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* PAYMENTS */}
+          <TabsContent value="payments" className="mt-6 space-y-4">
+            <Card>
+              <CardContent className="p-6 space-y-5">
+                <SectionHeading icon={<ReceiptIndianRupee className="w-4 h-4" />}>
+                  Payments
+                </SectionHeading>
+
+                {payments.length === 0 ? (
+                  <EmptyText text="No payments yet — apply to an internship to get started." />
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <StatCard
+                        icon={<ReceiptIndianRupee className="w-4 h-4" />}
+                        label="Total paid"
+                        value={paidTotal}
+                        isCurrency
+                      />
+                      <StatCard
+                        icon={<CheckCircle2 className="w-4 h-4" />}
+                        label="Successful"
+                        value={payments.filter((p) => p.status === "paid").length}
+                      />
+                      <StatCard
+                        icon={<Briefcase className="w-4 h-4" />}
+                        label="Internships"
+                        value={
+                          new Set(
+                            payments
+                              .filter((p) => p.status === "paid")
+                              .map((p) => p.internshipId)
+                          ).size
+                        }
+                      />
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-2">
+                      {payments.map((p) => (
+                        <PaymentRow key={p.id} payment={p} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -440,19 +534,92 @@ function StatCard({
   icon,
   label,
   value,
+  isCurrency,
 }: {
   icon: React.ReactNode;
   label: string;
   value: number;
+  isCurrency?: boolean;
 }) {
   return (
     <Card>
       <CardContent className="p-4">
         <div className="text-muted-foreground mb-2">{icon}</div>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-2xl font-bold">
+          {isCurrency
+            ? `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+            : value}
+        </div>
         <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
       </CardContent>
     </Card>
+  );
+}
+
+// =====================================================
+// Payment row
+// =====================================================
+const PAYMENT_STATUS: Record<
+  MyPayment["status"],
+  { label: string; icon: React.ReactNode; className: string }
+> = {
+  paid: {
+    label: "Paid",
+    icon: <CheckCircle2 className="w-3 h-3" />,
+    className:
+      "bg-emerald-500/10 text-emerald-500 border-emerald-500/30",
+  },
+  pending: {
+    label: "Pending",
+    icon: <Clock className="w-3 h-3" />,
+    className: "bg-amber-500/10 text-amber-500 border-amber-500/30",
+  },
+  failed: {
+    label: "Failed",
+    icon: <XCircle className="w-3 h-3" />,
+    className: "bg-destructive/10 text-destructive border-destructive/30",
+  },
+};
+
+function PaymentRow({ payment }: { payment: MyPayment }) {
+  const status = PAYMENT_STATUS[payment.status] ?? PAYMENT_STATUS.failed;
+
+  return (
+    <div className="flex items-start gap-3 rounded-xl border p-3.5">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold truncate">
+          {payment.internshipName}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {payment.demandName ?? "General"} ·{" "}
+          {new Date(payment.createdAt).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })}
+        </p>
+        {payment.status === "failed" && payment.failureReason && (
+          <p className="text-[11px] text-muted-foreground/80 mt-1">
+            {payment.failureReason}
+          </p>
+        )}
+        {payment.razorpayPaymentId && (
+          <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono truncate">
+            Ref: {payment.razorpayPaymentId}
+          </p>
+        )}
+      </div>
+
+      <div className="text-right shrink-0 space-y-1">
+        <p className="text-sm font-bold tabular-nums">
+          ₹{payment.amount.toLocaleString("en-IN")}
+        </p>
+        <Badge variant="outline" className={cn("text-[10px]", status.className)}>
+          {status.icon}
+          {status.label}
+        </Badge>
+      </div>
+    </div>
   );
 }
 

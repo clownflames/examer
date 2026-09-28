@@ -1,7 +1,7 @@
-'use client'
+﻿'use client'
 
 import * as React from 'react'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
@@ -59,7 +59,7 @@ export function RegistrationDrawerForm({
     const [loading, setLoading] = React.useState(true)
 
     const form = useForm<FormValues>({
-        resolver: zodResolver(clientSchema),
+        resolver: zodResolver(clientSchema) as Resolver<FormValues>,
         defaultValues: {
             userId: '',
             internshipId: '',
@@ -117,7 +117,7 @@ export function RegistrationDrawerForm({
 
     if (loading) {
         return (
-            <p className="text-muted-foreground text-sm">Loading options…</p>
+            <p className="text-muted-foreground text-sm">Loading options”¦</p>
         )
     }
 
@@ -223,7 +223,7 @@ export function RegistrationDrawerForm({
                             <Input
                                 {...field}
                                 id="resumeUrl"
-                                placeholder="https://…"
+                                placeholder="https://”¦"
                                 value={field.value ?? ''}
                             />
                             <FieldDescription>Optional.</FieldDescription>
@@ -244,7 +244,7 @@ export function RegistrationDrawerForm({
                                 onChange={field.onChange}
                                 onBlur={field.onBlur}
                                 minHeight="140px"
-                                placeholder="Write the student's cover letter…"
+                                placeholder="Write the student's cover letter”¦"
                             />
                             <FieldDescription>
                                 Optional. Supports bold, lists, links, and headings.
@@ -265,7 +265,7 @@ export function RegistrationDrawerForm({
                     Reset
                 </Button>
                 <Button type="submit" disabled={submitting}>
-                    {submitting ? 'Registering…' : 'Register Student'}
+                    {submitting ? 'Registering”¦' : 'Register Student'}
                 </Button>
             </div>
         </form>

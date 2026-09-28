@@ -394,16 +394,18 @@ function DeleteTeamButton({ id, name }: { id: string; name: string }) {
 
   return (
     <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Delete"
-          disabled={pending}
-        >
-          <Trash2 className="text-destructive h-4 w-4" />
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Delete"
+            disabled={pending}
+          >
+            <Trash2 className="text-destructive h-4 w-4" />
+          </Button>
+        }
+      />
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this team?</AlertDialogTitle>

@@ -91,12 +91,14 @@ export function ExamsTable({
         </p>
 
         <Drawer open={createOpen} onOpenChange={setCreateOpen}>
-          <DrawerTrigger asChild>
-            <Button>
-              <Plus />
-              Create Exam
-            </Button>
-          </DrawerTrigger>
+          <DrawerTrigger
+            render={
+              <Button>
+                <Plus />
+                Create Exam
+              </Button>
+            }
+          />
           <DrawerContent className="max-h-[90vh]">
             <DrawerHeader className="text-left">
               <DrawerTitle>Create New Exam</DrawerTitle>
@@ -296,12 +298,14 @@ function QuestionsButton({
 
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <DrawerTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-1 px-2">
-          <FileQuestion className="h-3.5 w-3.5" />
-          {questionCount}
-        </Button>
-      </DrawerTrigger>
+      <DrawerTrigger
+        render={
+          <Button variant="ghost" size="sm" className="gap-1 px-2">
+            <FileQuestion className="h-3.5 w-3.5" />
+            {questionCount}
+          </Button>
+        }
+      />
       <DrawerContent className="max-h-[92vh]">
         <DrawerHeader className="text-left">
           <DrawerTitle>Questions</DrawerTitle>
@@ -312,10 +316,6 @@ function QuestionsButton({
         <div className="overflow-y-auto px-4 pb-6">
           <ExamQuestionsDrawer
             examId={examId}
-            onClose={() => {
-              setOpen(false)
-              router.refresh()
-            }}
           />
         </div>
       </DrawerContent>
@@ -339,11 +339,13 @@ function EditExamButton({
 
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <DrawerTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Edit">
-          <Pencil className="h-4 w-4" />
-        </Button>
-      </DrawerTrigger>
+      <DrawerTrigger
+        render={
+          <Button variant="ghost" size="icon" aria-label="Edit">
+            <Pencil className="h-4 w-4" />
+          </Button>
+        }
+      />
       <DrawerContent className="max-h-[90vh]">
         <DrawerHeader className="text-left">
           <DrawerTitle>Edit Exam</DrawerTitle>
@@ -392,16 +394,18 @@ function DeleteExamButton({ id, name }: { id: string; name: string }) {
 
   return (
     <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Delete"
-          disabled={pending}
-        >
-          <Trash2 className="text-destructive h-4 w-4" />
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Delete"
+            disabled={pending}
+          >
+            <Trash2 className="text-destructive h-4 w-4" />
+          </Button>
+        }
+      />
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this exam?</AlertDialogTitle>

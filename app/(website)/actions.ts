@@ -1,11 +1,25 @@
-"use server";
+﻿"use server";
 
+import crypto from "crypto";
 import { db } from "@/db";
-import { internships, employeeDemand, internshipRegistration, team, teamMember, user, teamGoals, teamFinalResult } from "@/db/schema";
-import { eq, desc, sql, and } from "drizzle-orm";
+import {
+  internships,
+  employeeDemand,
+  internshipRegistration,
+  team,
+  teamMember,
+  user,
+  teamGoals,
+  teamFinalResult,
+  payments,
+  exams,
+  examSubmission,
+} from "@/db/schema";
+import { eq, desc, asc, sql, and, inArray, isNotNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { getRazorpay, getRazorpayPublicKeyId } from "@/lib/razorpay";
 
 // =====================================================
 // TYPES
@@ -14,11 +28,15 @@ export type InternshipListItem = {
   id: string;
   name: string;
   description: string | null;
+  jdUrl: string | null;
   startDate: Date | null;
   endDate: Date | null;
   lastSubmissionDate: Date | null;
   sellingPrice: string | null;
+  price: string | null;
   totalScore: number;
+  examinerName: string | null;
+  examinerPhotoUrl: string | null;
   demandName: string | null;
   demandIconUrl: string | null;
   isRegistered: boolean;
@@ -40,50 +58,28 @@ export async function getInternships(): Promise<InternshipListItem[]> {
         id: internships.id,
         name: internships.name,
         description: internships.description,
+        jdUrl: internships.jdUrl,
         startDate: internships.startDate,
         endDate: internships.endDate,
         lastSubmissionDate: internships.lastSubmissionDate,
         sellingPrice: internships.sellingPrice,
         price: internships.price,
         totalScore: internships.totalScore,
+        examinerName: internships.examinerName,
+        examinerPhotoUrl: internships.examinerPhotoUrl,
         demandName: employeeDemand.name,
         demandIconUrl: employeeDemand.iconUrl,
-        // payment status via registration
-        registrationId: internshipRegistration.id,
-        paymentStatus: payments.status,
       })
       .from(internships)
       .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id))
-      .leftJoin(
-        internshipRegistration,
-        userId
-          ? sql`${internshipRegistration.internshipId} = ${internships.id} 
-                 AND ${internshipRegistration.userId} = ${userId}`
-          : sql`false`
-      )
-      .leftJoin(
-        payments,
-        userId
-          ? sql`${payments.registrationId} = ${internshipRegistration.id}
-                 AND ${payments.status} = 'paid'`
-          : sql`false`
-      )
       .orderBy(desc(internships.createdAt))
       .limit(20);
 
+    const paidIds = await getPaidInternshipIds(userId);
+
     return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      startDate: r.startDate,
-      endDate: r.endDate,
-      lastSubmissionDate: r.lastSubmissionDate,
-      sellingPrice: r.sellingPrice,
-      price: r.price,
-      totalScore: r.totalScore,
-      demandName: r.demandName,
-      demandIconUrl: r.demandIconUrl,
-      isRegistered: r.paymentStatus === "paid", // ✅ sirf paid users
+      ...r,
+      isRegistered: paidIds.has(r.id), // œ… sirf paid users ko "Applied"
     }));
   } catch (error) {
     console.error("getInternships error:", error);
@@ -91,75 +87,26 @@ export async function getInternships(): Promise<InternshipListItem[]> {
   }
 }
 
-// =====================================================
-// APPLY TO INTERNSHIP
-// =====================================================
-export type ApplyResult =
-  | { success: true; message: string }
-  | { success: false; error: string; requiresLogin?: boolean };
-
-export async function applyToInternship(
-  internshipId: string,
-  coverLetter: string,
-  resumeUrl: string
-): Promise<ApplyResult> {
+/**
+ * Set of internship ids the given user has an ACTIVE (paid) registration for.
+ * Queried separately from the internship list so a user with several
+ * payment attempts can never duplicate the internship rows.
+ */
+export async function getPaidInternshipIds(
+  userId: string | null | undefined
+): Promise<Set<string>> {
+  if (!userId) return new Set();
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-
-    if (!session?.user?.id) {
-      return {
-        success: false,
-        error: "Please login to apply",
-        requiresLogin: true,
-      };
-    }
-
-    if (!internshipId) {
-      return { success: false, error: "Invalid internship" };
-    }
-
-    if (!coverLetter.trim() || coverLetter.trim().length < 20) {
-      return { success: false, error: "Cover letter must be at least 20 characters" };
-    }
-
-    if (!resumeUrl.trim()) {
-      return { success: false, error: "Resume URL is required" };
-    }
-
-    // Check if already registered
-    const existing = await db
-      .select({ id: internshipRegistration.id })
-      .from(internshipRegistration)
-      .where(
-        sql`${internshipRegistration.userId} = ${session.user.id} 
-             AND ${internshipRegistration.internshipId} = ${internshipId}`
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      return { success: false, error: "You have already applied to this internship" };
-    }
-
-    await db.insert(internshipRegistration).values({
-      id: crypto.randomUUID(),
-      userId: session.user.id,
-      internshipId,
-      coverLetter: coverLetter.trim(),
-      resumeUrl: resumeUrl.trim(),
-    });
-
-    revalidatePath("/");
-
-    return { success: true, message: "Application submitted successfully!" };
+    const rows = await db
+      .selectDistinct({ internshipId: payments.internshipId })
+      .from(payments)
+      .where(and(eq(payments.userId, userId), eq(payments.status, "paid")));
+    return new Set(rows.map((r) => r.internshipId));
   } catch (error) {
-    console.error("applyToInternship error:", error);
-    return { success: false, error: "Something went wrong. Please try again." };
+    console.error("getPaidInternshipIds error:", error);
+    return new Set();
   }
 }
-
-
 
 // =====================================================
 // TIER LIST
@@ -737,100 +684,455 @@ export async function getDemandDetail(
   }
 }
 
+// =====================================================
+// PAYMENT — shared helpers
+// =====================================================
+
+/** Current user id, or null when not signed in. */
+async function currentUserId(): Promise<string | null> {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    return session?.user?.id ?? null;
+  } catch (error) {
+    console.error("currentUserId error:", error);
+    return null;
+  }
+}
+
+/** HTML -> readable plain text, used to validate rich-text fields. */
+function stripHtml(html: string | null | undefined): string {
+  return (html ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Amount the user actually has to pay, in RUPEES.
+ * sellingPrice wins, then price, then 0 (= free access, no Razorpay needed).
+ */
+function effectiveAmountRupees(row: {
+  sellingPrice: string | null;
+  price: string | null;
+}): number {
+  const selling = Number(row.sellingPrice ?? NaN);
+  if (Number.isFinite(selling) && selling > 0) return selling;
+  const mrrp = Number(row.price ?? NaN);
+  if (Number.isFinite(mrrp) && mrrp > 0) return mrrp;
+  return 0;
+}
+
+/** Razorpay works in the smallest currency unit (paise). */
+function toPaise(rupees: number): number {
+  return Math.max(1, Math.round(rupees * 100));
+}
+
+/** Constant-time hex comparison so signature checks can't be timed. */
+function safeHexEqual(a: string, b: string): boolean {
+  if (!/^[0-9a-f]+$/i.test(a) || !/^[0-9a-f]+$/i.test(b)) return false;
+  const bufA = Buffer.from(a, "hex");
+  const bufB = Buffer.from(b, "hex");
+  if (bufA.length === 0 || bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/** Recompute the Razorpay signature (we hold the secret). */
+function buildRazorpaySignature(orderId: string, paymentId: string): string {
+  return crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+    .update(`${orderId}|${paymentId}`)
+    .digest("hex");
+}
+
+function fmtDate(d: Date | null | undefined): string {
+  if (!d) return "";
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/**
+ * Razorpay's `order.payments` comes back as an array of payment ids, but some
+ * typings describe it as entities. Handle both shapes.
+ */
+function firstPaymentIdFromOrder(order: { payments?: unknown }): string | null {
+  const list = order.payments;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const first: unknown = list[0];
+  if (typeof first === "string" && first) return first;
+  if (first && typeof first === "object" && "id" in first) {
+    const id = (first as { id?: unknown }).id;
+    if (typeof id === "string" && id) return id;
+  }
+  return null;
+}
+
+/** Drizzle transaction handle, inferred from db.transaction's callback. */
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function hasPaidPayment(
+  userId: string,
+  internshipId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: payments.id })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.userId, userId),
+        eq(payments.internshipId, internshipId),
+        eq(payments.status, "paid")
+      )
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** Marks a payment row failed WITHOUT deleting the user's application. */
+async function failPaymentById(paymentId: string, reason: string) {
+  try {
+    await db
+      .update(payments)
+      .set({ status: "failed", failureReason: reason })
+      .where(eq(payments.id, paymentId));
+  } catch (error) {
+    console.error("failPaymentById error:", error);
+  }
+}
+
+/**
+ * Self-healing: the browser callback can be lost (tab closed, network drop)
+ * even though Razorpay captured the money. Ask Razorpay what really happened
+ * and repair our local state. Never throws.
+ */
+async function reconcilePendingPayment(
+  userId: string,
+  internshipId: string
+): Promise<boolean> {
+  try {
+    const [pending] = await db
+      .select({
+        id: payments.id,
+        razorpayOrderId: payments.razorpayOrderId,
+        createdAt: payments.createdAt,
+      })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.userId, userId),
+          eq(payments.internshipId, internshipId),
+          eq(payments.status, "pending")
+        )
+      )
+      .orderBy(desc(payments.createdAt))
+      .limit(1);
+
+    if (!pending?.razorpayOrderId) return false;
+
+    // Razorpay orders stay payable for 24h. Anything older is dead — clean it up.
+    const ageMs = Date.now() - new Date(pending.createdAt).getTime();
+    if (ageMs > 24 * 60 * 60 * 1000) {
+      await failPaymentById(pending.id, "Payment window expired");
+      return false;
+    }
+
+    const rzp = getRazorpay();
+    const order = await rzp.orders.fetch(pending.razorpayOrderId);
+
+    if (order.status === "paid") {
+      const paymentId = firstPaymentIdFromOrder(order);
+      if (paymentId) {
+        await db
+          .update(payments)
+          .set({
+            status: "paid",
+            razorpayPaymentId: paymentId,
+            razorpaySignature: buildRazorpaySignature(
+              pending.razorpayOrderId,
+              paymentId
+            ),
+            paidAt: new Date(),
+            failureReason: null,
+          })
+          .where(eq(payments.id, pending.id));
+        return true;
+      }
+    }
+
+    if (order.status === "created" && ageMs > 60 * 60 * 1000) {
+      await failPaymentById(pending.id, "Payment not completed in time");
+    }
+
+    return false;
+  } catch (error) {
+    console.error("reconcilePendingPayment error:", error);
+    return false;
+  }
+}
 
 // =====================================================
-// RAZORPAY IMPORTS
-// =====================================================
-import { razorpay } from "@/lib/razorpay";
-import crypto from "crypto";
-import { payments, exams, examSubmission } from "@/db/schema";
-
-// =====================================================
-// CREATE REGISTRATION + RAZORPAY ORDER
+// STEP 1 — SAVE APPLICATION + CREATE PAYMENT ORDER
 // =====================================================
 export type CreateOrderResult =
+  | { success: true; free: true }
   | {
       success: true;
+      free: false;
       orderId: string;
       amount: number;
       currency: string;
       registrationId: string;
       keyId: string;
     }
-  | { success: false; error: string; requiresLogin?: boolean };
+  | {
+      success: false;
+      error: string;
+      code?:
+        | "unauthorized"
+        | "invalid"
+        | "closed"
+        | "already_paid"
+        | "validation";
+    };
 
 export async function createRegistrationAndOrder(
   internshipId: string,
   coverLetter: string,
   resumeUrl: string
 ): Promise<CreateOrderResult> {
-  try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
+  const userId = await currentUserId();
+  if (!userId) {
+    return {
+      success: false,
+      error: "Please login to continue",
+      code: "unauthorized",
+    };
+  }
 
-    if (!session?.user?.id) {
+  if (!internshipId || !internshipId.trim()) {
+    return { success: false, error: "Invalid internship", code: "invalid" };
+  }
+
+  try {
+    const [internship] = await db
+      .select({
+        id: internships.id,
+        name: internships.name,
+        sellingPrice: internships.sellingPrice,
+        price: internships.price,
+        lastSubmissionDate: internships.lastSubmissionDate,
+      })
+      .from(internships)
+      .where(eq(internships.id, internshipId))
+      .limit(1);
+
+    if (!internship) {
       return {
         success: false,
-        error: "Please login to apply",
-        requiresLogin: true,
+        error: "This internship is no longer available",
+        code: "invalid",
       };
     }
 
-    // ... validation same ...
+    // ---- closed? ----
+    if (
+      internship.lastSubmissionDate &&
+      new Date(internship.lastSubmissionDate).getTime() < Date.now()
+    ) {
+      return {
+        success: false,
+        error: `Applications closed on ${fmtDate(internship.lastSubmissionDate)}`,
+        code: "closed",
+      };
+    }
 
-    // create Razorpay order FIRST (before DB inserts)
-    const amount = Number(internships.sellingPrice ?? 0);
-    const order = await razorpay.orders.create({
-      amount: Math.round(amount * 100),
-      currency: "INR",
-      receipt: `rcpt_${Date.now()}`,
-      notes: {
-        userId: session.user.id,
-        internshipId,
-      },
-    });
+    // ---- form validation ----
+    if (stripHtml(coverLetter).length < 20) {
+      return {
+        success: false,
+        error: "Cover letter must be at least 20 characters",
+        code: "validation",
+      };
+    }
 
-    const registrationId = crypto.randomUUID();
+    const resume = resumeUrl.trim();
+    if (!resume) {
+      return {
+        success: false,
+        error: "Resume URL is required",
+        code: "validation",
+      };
+    }
+    if (!isValidHttpUrl(resume)) {
+      return {
+        success: false,
+        error: "Resume URL must be a valid link starting with http:// or https://",
+        code: "validation",
+      };
+    }
 
-    // ✅ TRANSACTION: registration + payment dono ek saath
-    await db.transaction(async (tx) => {
-      await tx.insert(internshipRegistration).values({
-        id: registrationId,
-        userId: session.user.id,
-        internshipId,
-        coverLetter: coverLetter.trim(),
-        resumeUrl: resumeUrl.trim(),
+    // Heal any earlier attempt that may have actually succeeded on Razorpay's
+    // side before deciding what the user still owes.
+    await reconcilePendingPayment(userId, internshipId);
+
+    // ---- already paid? ----
+    if (await hasPaidPayment(userId, internshipId)) {
+      return {
+        success: false,
+        error: "You have already paid for this internship",
+        code: "already_paid",
+      };
+    }
+
+    // ---- reuse the application instead of creating a duplicate ----
+    const [existingReg] = await db
+      .select({ id: internshipRegistration.id })
+      .from(internshipRegistration)
+      .where(
+        and(
+          eq(internshipRegistration.userId, userId),
+          eq(internshipRegistration.internshipId, internshipId)
+        )
+      )
+      .orderBy(asc(internshipRegistration.createdAt))
+      .limit(1);
+
+    const registrationId = existingReg?.id ?? crypto.randomUUID();
+    const amountRupees = effectiveAmountRupees(internship);
+
+    const saveApplication = async (tx: DbTransaction) => {
+      if (existingReg) {
+        await tx
+          .update(internshipRegistration)
+          .set({ coverLetter: coverLetter.trim(), resumeUrl: resume })
+          .where(eq(internshipRegistration.id, registrationId));
+      } else {
+        await tx.insert(internshipRegistration).values({
+          id: registrationId,
+          userId,
+          internshipId,
+          coverLetter: coverLetter.trim(),
+          resumeUrl: resume,
+        });
+      }
+    };
+
+    // ---- FREE internship: no gateway needed ----
+    if (amountRupees <= 0) {
+      await db.transaction(async (tx) => {
+        await saveApplication(tx);
+        await tx.insert(payments).values({
+          id: crypto.randomUUID(),
+          userId,
+          registrationId,
+          internshipId,
+          amount: "0.00",
+          currency: "INR",
+          status: "paid",
+          paidAt: new Date(),
+        });
       });
+
+      revalidatePath("/");
+      revalidatePath("/internships");
+      revalidatePath("/profile");
+      return { success: true, free: true };
+    }
+
+    // ---- PAID internship ----
+    const keyId = getRazorpayPublicKeyId();
+    if (!keyId) {
+      return {
+        success: false,
+        error: "Payments are being set up. Please try again in a moment.",
+      };
+    }
+
+    const amount = toPaise(amountRupees);
+
+    let orderId: string;
+    try {
+      const order = await getRazorpay().orders.create({
+        amount,
+        currency: "INR",
+        receipt: `reg_${registrationId.slice(0, 8)}_${Date.now()}`,
+        notes: { userId, internshipId, registrationId },
+      });
+      orderId = order.id;
+    } catch (error) {
+      console.error("razorpay.orders.create error:", error);
+      return {
+        success: false,
+        error: "Could not start the payment. Please try again.",
+      };
+    }
+
+    await db.transaction(async (tx) => {
+      await saveApplication(tx);
+
+      // retire older attempts so the status is never ambiguous
+      await tx
+        .update(payments)
+        .set({
+          status: "failed",
+          failureReason: "Replaced by a newer payment attempt",
+        })
+        .where(
+          and(
+            eq(payments.registrationId, registrationId),
+            eq(payments.status, "pending")
+          )
+        );
 
       await tx.insert(payments).values({
         id: crypto.randomUUID(),
-        userId: session.user.id,
+        userId,
         registrationId,
         internshipId,
-        amount: amount.toString(),
+        amount: amountRupees.toFixed(2),
         currency: "INR",
         status: "pending",
-        razorpayOrderId: order.id,
+        razorpayOrderId: orderId,
       });
     });
 
     return {
       success: true,
-      orderId: order.id,
-      amount: amount * 100,
+      free: false,
+      orderId,
+      amount,
       currency: "INR",
       registrationId,
-      keyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
+      keyId,
     };
   } catch (error) {
     console.error("createRegistrationAndOrder error:", error);
-    return { success: false, error: "Something went wrong. Please try again." };
+    return {
+      success: false,
+      error: "Something went wrong. Please try again.",
+    };
   }
 }
 
 // =====================================================
-// VERIFY PAYMENT
+// STEP 2 — VERIFY PAYMENT
 // =====================================================
 export type VerifyResult =
   | { success: true }
@@ -841,30 +1143,20 @@ export async function verifyPayment(params: {
   razorpayPaymentId: string;
   razorpaySignature: string;
 }): Promise<VerifyResult> {
+  const userId = await currentUserId();
+  if (!userId) return { success: false, error: "Not authenticated" };
+
+  const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = params ?? {
+    razorpayOrderId: "",
+    razorpayPaymentId: "",
+    razorpaySignature: "",
+  };
+
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    return { success: false, error: "Incomplete payment response" };
+  }
+
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    if (!session?.user?.id) {
-      return { success: false, error: "Not authenticated" };
-    }
-
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = params;
-
-    // verify signature
-    const body = `${razorpayOrderId}|${razorpayPaymentId}`;
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
-      .update(body)
-      .digest("hex");
-
-    if (expectedSignature !== razorpaySignature) {
-      // signature mismatch → mark failed and delete
-      await markPaymentFailed(razorpayOrderId, "Signature mismatch", true);
-      return { success: false, error: "Payment verification failed" };
-    }
-
-    // find payment row
     const [payment] = await db
       .select()
       .from(payments)
@@ -872,14 +1164,31 @@ export async function verifyPayment(params: {
       .limit(1);
 
     if (!payment) {
-      return { success: false, error: "Payment not found" };
+      return { success: false, error: "Payment record not found" };
     }
-
-    if (payment.userId !== session.user.id) {
+    if (payment.userId !== userId) {
       return { success: false, error: "Unauthorized" };
     }
+    // idempotent — Razorpay can fire the handler more than once
+    if (payment.status === "paid") {
+      return { success: true };
+    }
 
-    // update payment
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!secret) {
+      return { success: false, error: "Payment verification is not configured" };
+    }
+
+    const expectedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest("hex");
+
+    if (!safeHexEqual(expectedSignature, razorpaySignature)) {
+      await failPaymentById(payment.id, "Signature mismatch");
+      return { success: false, error: "Payment verification failed" };
+    }
+
     await db
       .update(payments)
       .set({
@@ -887,11 +1196,13 @@ export async function verifyPayment(params: {
         razorpayPaymentId,
         razorpaySignature,
         paidAt: new Date(),
+        failureReason: null,
       })
       .where(eq(payments.id, payment.id));
 
     revalidatePath("/");
     revalidatePath("/internships");
+    revalidatePath("/profile");
 
     return { success: true };
   } catch (error) {
@@ -901,13 +1212,14 @@ export async function verifyPayment(params: {
 }
 
 // =====================================================
-// MARK PAYMENT FAILED + OPTIONALLY DELETE
+// STEP 2b — CANCEL / FAILED
 // =====================================================
-async function markPaymentFailed(
-  razorpayOrderId: string,
-  reason: string,
-  deleteRegistration = true
-) {
+export async function cancelPayment(
+  razorpayOrderId: string
+): Promise<{ success: boolean }> {
+  const userId = await currentUserId();
+  if (!userId) return { success: false };
+
   try {
     const [payment] = await db
       .select()
@@ -915,37 +1227,12 @@ async function markPaymentFailed(
       .where(eq(payments.razorpayOrderId, razorpayOrderId))
       .limit(1);
 
-    if (!payment) return;
-
-    if (deleteRegistration) {
-      // registration delete → payments cascade delete bhi ho jayega
-      await db
-        .delete(internshipRegistration)
-        .where(eq(internshipRegistration.id, payment.registrationId));
-    } else {
-      await db
-        .update(payments)
-        .set({ status: "failed", failureReason: reason })
-        .where(eq(payments.id, payment.id));
+    // never downgrade a payment that already went through
+    if (!payment || payment.userId !== userId || payment.status === "paid") {
+      return { success: true };
     }
-  } catch (error) {
-    console.error("markPaymentFailed error:", error);
-  }
-}
 
-// =====================================================
-// CANCEL PAYMENT (user ne cancel kiya ya failed)
-// =====================================================
-export async function cancelPayment(
-  razorpayOrderId: string
-): Promise<{ success: boolean }> {
-  try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    if (!session?.user?.id) return { success: false };
-
-    await markPaymentFailed(razorpayOrderId, "Cancelled by user", true);
+    await failPaymentById(payment.id, "Cancelled by user");
     return { success: true };
   } catch (error) {
     console.error("cancelPayment error:", error);
@@ -954,78 +1241,166 @@ export async function cancelPayment(
 }
 
 // =====================================================
-// GET USER REGISTRATION STATUS FOR AN INTERNSHIP
+// STEP 2c — MANUAL "CHECK PAYMENT STATUS" (recovery)
 // =====================================================
-export type RegistrationStatus =
-  | { state: "none" }
-  | { state: "pending"; razorpayOrderId: string | null; amount: number }
-  | { state: "paid" };
+export type SyncResult = { success: true; paid: boolean } | { success: false; error: string };
 
-export async function getMyRegistrationStatus(
-  internshipId: string
-): Promise<RegistrationStatus> {
+export async function syncPaymentStatus(
+  razorpayOrderId: string
+): Promise<SyncResult> {
+  const userId = await currentUserId();
+  if (!userId) return { success: false, error: "Not authenticated" };
+
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    if (!session?.user?.id) return { state: "none" };
-
-    // 1. registration dhundo
-    const [reg] = await db
-      .select({ id: internshipRegistration.id })
-      .from(internshipRegistration)
-      .where(
-        and(
-          eq(internshipRegistration.userId, session.user.id),
-          eq(internshipRegistration.internshipId, internshipId)
-        )
-      )
-      .limit(1);
-
-    if (!reg) return { state: "none" };
-
-    // 2. payment dhundo (latest ek)
-    const [pay] = await db
-      .select({
-        id: payments.id,
-        status: payments.status,
-        razorpayOrderId: payments.razorpayOrderId,
-        amount: payments.amount,
-      })
+    const [payment] = await db
+      .select()
       .from(payments)
-      .where(eq(payments.registrationId, reg.id))
-      .orderBy(desc(payments.createdAt))
+      .where(eq(payments.razorpayOrderId, razorpayOrderId))
       .limit(1);
 
-    // registration hai but payment row nahi mili — rare case
-    if (!pay) {
-      console.warn(
-        "[getMyRegistrationStatus] Registration exists but no payment row:",
-        reg.id
-      );
-      return { state: "none" };
+    if (!payment || payment.userId !== userId) {
+      return { success: false, error: "Payment not found" };
+    }
+    if (payment.status === "paid") return { success: true, paid: true };
+
+    const order = await getRazorpay().orders.fetch(razorpayOrderId);
+    const paymentId = firstPaymentIdFromOrder(order);
+
+    if (order.status === "paid" && paymentId) {
+      await db
+        .update(payments)
+        .set({
+          status: "paid",
+          razorpayPaymentId: paymentId,
+          razorpaySignature: buildRazorpaySignature(razorpayOrderId, paymentId),
+          paidAt: new Date(),
+          failureReason: null,
+        })
+        .where(eq(payments.id, payment.id));
+
+      revalidatePath("/");
+      revalidatePath("/internships");
+      revalidatePath("/profile");
+      return { success: true, paid: true };
     }
 
-    if (pay.status === "paid") return { state: "paid" };
-
-    if (pay.status === "pending" && pay.razorpayOrderId) {
-      return {
-        state: "pending",
-        razorpayOrderId: pay.razorpayOrderId,
-        amount: Math.round(Number(pay.amount) * 100),
-      };
-    }
-
-    // failed status wali payment hai → form dikhao (fresh start)
-    return { state: "none" };
+    return { success: true, paid: false };
   } catch (error) {
-    console.error("getMyRegistrationStatus error:", error);
-    return { state: "none" };
+    console.error("syncPaymentStatus error:", error);
+    return { success: false, error: "Could not reach the payment gateway" };
   }
 }
 
 // =====================================================
-// GET INTERNSHIP EXAMS (with submission status)
+// STEP 3 — WHERE IS THIS USER IN THE FLOW?
+// =====================================================
+export type RegistrationStatus = {
+  state: "none" | "paid";
+  /** Prefill the form when they come back after a failed/abandoned attempt. */
+  coverLetter: string | null;
+  resumeUrl: string | null;
+  registrationId: string | null;
+  paidAt: string | null;
+  amountPaid: number | null;
+  amountDue: number;
+  currency: string;
+};
+
+export async function getMyRegistrationStatus(
+  internshipId: string
+): Promise<RegistrationStatus> {
+  const empty: RegistrationStatus = {
+    state: "none",
+    coverLetter: null,
+    resumeUrl: null,
+    registrationId: null,
+    paidAt: null,
+    amountPaid: null,
+    amountDue: 0,
+    currency: "INR",
+  };
+
+  const userId = await currentUserId();
+  if (!userId) return empty;
+
+  try {
+    const [internship] = await db
+      .select({ sellingPrice: internships.sellingPrice, price: internships.price })
+      .from(internships)
+      .where(eq(internships.id, internshipId))
+      .limit(1);
+
+    const amountDue = internship
+      ? effectiveAmountRupees(internship)
+      : 0;
+
+    const [reg] = await db
+      .select({
+        id: internshipRegistration.id,
+        coverLetter: internshipRegistration.coverLetter,
+        resumeUrl: internshipRegistration.resumeUrl,
+      })
+      .from(internshipRegistration)
+      .where(
+        and(
+          eq(internshipRegistration.userId, userId),
+          eq(internshipRegistration.internshipId, internshipId)
+        )
+      )
+      .orderBy(asc(internshipRegistration.createdAt))
+      .limit(1);
+
+    if (!reg) return { ...empty, amountDue };
+
+    // repair a lost callback before deciding what to show
+    await reconcilePendingPayment(userId, internshipId);
+
+    const [paid] = await db
+      .select({
+        amount: payments.amount,
+        paidAt: payments.paidAt,
+      })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.registrationId, reg.id),
+          eq(payments.status, "paid")
+        )
+      )
+      .orderBy(desc(payments.paidAt))
+      .limit(1);
+
+    if (paid) {
+      return {
+        state: "paid",
+        coverLetter: reg.coverLetter,
+        resumeUrl: reg.resumeUrl,
+        registrationId: reg.id,
+        paidAt: paid.paidAt ? new Date(paid.paidAt).toISOString() : null,
+        amountPaid: Number(paid.amount ?? 0),
+        amountDue,
+        currency: "INR",
+      };
+    }
+
+    return {
+      state: "none",
+      coverLetter: reg.coverLetter,
+      resumeUrl: reg.resumeUrl,
+      registrationId: reg.id,
+      paidAt: null,
+      amountPaid: null,
+      amountDue,
+      currency: "INR",
+    };
+  } catch (error) {
+    console.error("getMyRegistrationStatus error:", error);
+    return empty;
+  }
+}
+
+// =====================================================
+// STEP 4 — EXAMS UNLOCKED BY A PAID REGISTRATION
 // =====================================================
 export type InternshipExam = {
   id: string;
@@ -1036,41 +1411,67 @@ export type InternshipExam = {
   totalMarks: number;
   passingMarks: number | null;
   attempted: boolean;
+  attemptCount: number;
   submittedAt: string | null;
+  score: number | null;
+  passed: boolean | null;
+  pendingReview: number;
 };
+
+type SubmissionMeta = {
+  answers: unknown;
+};
+
+function readSubmissionMeta(raw: unknown): {
+  score: number | null;
+  passed: boolean | null;
+  pendingReview: number;
+} {
+  if (!raw || typeof raw !== "object") {
+    return { score: null, passed: null, pendingReview: 0 };
+  }
+  const meta = raw as SubmissionMeta & {
+    score?: number;
+    passed?: boolean | null;
+    pendingReview?: number;
+  };
+  return {
+    score: typeof meta.score === "number" ? meta.score : null,
+    passed: typeof meta.passed === "boolean" ? meta.passed : null,
+    pendingReview:
+      typeof meta.pendingReview === "number" ? meta.pendingReview : 0,
+  };
+}
+
+/** True when the user has a PAID registration for this internship. */
+export async function hasPaidAccess(
+  userId: string,
+  internshipId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: payments.id })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.userId, userId),
+        eq(payments.internshipId, internshipId),
+        eq(payments.status, "paid")
+      )
+    )
+    .limit(1);
+  return rows.length > 0;
+}
 
 export async function getInternshipExams(
   internshipId: string
 ): Promise<InternshipExam[]> {
+  const userId = await currentUserId();
+  if (!userId) return [];
+
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    if (!session?.user?.id) return [];
+    if (!(await hasPaidAccess(userId, internshipId))) return [];
 
-    // verify paid registration
-    const [reg] = await db
-      .select({ id: internshipRegistration.id })
-      .from(internshipRegistration)
-      .innerJoin(
-        payments,
-        and(
-          eq(payments.registrationId, internshipRegistration.id),
-          eq(payments.status, "paid")
-        )
-      )
-      .where(
-        and(
-          eq(internshipRegistration.userId, session.user.id),
-          eq(internshipRegistration.internshipId, internshipId)
-        )
-      )
-      .limit(1);
-
-    if (!reg) return []; // not paid
-
-    // fetch exams
-    const rows = await db
+    const examRows = await db
       .select({
         id: exams.id,
         orderNo: exams.orderNo,
@@ -1079,34 +1480,138 @@ export async function getInternshipExams(
         duration: exams.duration,
         totalMarks: exams.totalMarks,
         passingMarks: exams.passingMarks,
-        submissionSubmittedAt: examSubmission.submittedAt,
       })
       .from(exams)
-      .leftJoin(
-        examSubmission,
+      .where(eq(exams.internshipId, internshipId))
+      .orderBy(asc(exams.orderNo), asc(exams.createdAt));
+
+    if (examRows.length === 0) return [];
+
+    const submissionRows = await db
+      .select({
+        id: examSubmission.id,
+        examId: examSubmission.examId,
+        answers: examSubmission.answers,
+        submittedAt: examSubmission.submittedAt,
+      })
+      .from(examSubmission)
+      .where(
         and(
-          eq(examSubmission.examId, exams.id),
-          eq(examSubmission.userId, session.user.id)
+          eq(examSubmission.userId, userId),
+          inArray(
+            examSubmission.examId,
+            examRows.map((e) => e.id)
+          ),
+          isNotNull(examSubmission.submittedAt)
         )
       )
-      .where(eq(exams.internshipId, internshipId))
-      .orderBy(exams.orderNo);
+      .orderBy(desc(examSubmission.submittedAt));
 
-    return rows.map((r) => ({
-      id: r.id,
-      orderNo: r.orderNo,
-      name: r.name,
-      description: r.description,
-      duration: r.duration,
-      totalMarks: r.totalMarks,
-      passingMarks: r.passingMarks,
-      attempted: !!r.submissionSubmittedAt,
-      submittedAt: r.submissionSubmittedAt
-        ? r.submissionSubmittedAt.toISOString()
-        : null,
-    }));
+    // latest submission per exam + attempt count
+    const byExam = new Map<
+      string,
+      { count: number; latest: (typeof submissionRows)[number] | null }
+    >();
+    for (const row of submissionRows) {
+      const entry = byExam.get(row.examId);
+      if (!entry) {
+        byExam.set(row.examId, { count: 1, latest: row });
+      } else {
+        entry.count += 1;
+      }
+    }
+
+    return examRows.map((exam) => {
+      const entry = byExam.get(exam.id);
+      const latest = entry?.latest ?? null;
+      const meta = latest ? readSubmissionMeta(latest.answers) : null;
+
+      return {
+        id: exam.id,
+        orderNo: exam.orderNo,
+        name: exam.name,
+        description: exam.description,
+        duration: exam.duration,
+        totalMarks: exam.totalMarks,
+        passingMarks: exam.passingMarks,
+        attempted: !!latest,
+        attemptCount: entry?.count ?? 0,
+        submittedAt: latest?.submittedAt
+          ? new Date(latest.submittedAt).toISOString()
+          : null,
+        score: meta?.score ?? null,
+        passed: meta?.passed ?? null,
+        pendingReview: meta?.pendingReview ?? 0,
+      };
+    });
   } catch (error) {
     console.error("getInternshipExams error:", error);
     return [];
   }
 }
+
+// =====================================================
+// MY PAYMENTS (order history for the profile page)
+// =====================================================
+export type MyPayment = {
+  id: string;
+  internshipId: string;
+  internshipName: string;
+  demandName: string | null;
+  amount: number;
+  currency: string;
+  status: "pending" | "paid" | "failed";
+  createdAt: string;
+  paidAt: string | null;
+  razorpayOrderId: string | null;
+  razorpayPaymentId: string | null;
+  failureReason: string | null;
+};
+
+export async function getMyPayments(): Promise<MyPayment[]> {
+  const userId = await currentUserId();
+  if (!userId) return [];
+
+  try {
+    const rows = await db
+      .select({
+        id: payments.id,
+        internshipId: payments.internshipId,
+        amount: payments.amount,
+        currency: payments.currency,
+        status: payments.status,
+        createdAt: payments.createdAt,
+        paidAt: payments.paidAt,
+        razorpayOrderId: payments.razorpayOrderId,
+        razorpayPaymentId: payments.razorpayPaymentId,
+        failureReason: payments.failureReason,
+        internshipName: internships.name,
+        demandName: employeeDemand.name,
+      })
+      .from(payments)
+      .innerJoin(internships, eq(payments.internshipId, internships.id))
+      .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id))
+      .where(eq(payments.userId, userId))
+      .orderBy(desc(payments.createdAt))
+      .limit(50);
+
+    return rows.map((r) => ({
+      id: r.id,
+      internshipId: r.internshipId,
+      internshipName: r.internshipName,
+      demandName: r.demandName,
+      amount: Number(r.amount ?? 0),
+      currency: r.currency,
+      status: r.status,
+      createdAt: new Date(r.createdAt).toISOString(),
+      paidAt: r.paidAt ? new Date(r.paidAt).toISOString() : null,
+      razorpayOrderId: r.razorpayOrderId,
+      razorpayPaymentId: r.razorpayPaymentId,
+      failureReason: r.failureReason,
+    }));
+  } catch (error) {
+    console.error("getMyPayments error:", error);
+    return [];
+  }
+}
+

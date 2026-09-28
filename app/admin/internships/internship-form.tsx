@@ -1,8 +1,8 @@
-'use client'
+﻿'use client'
 
 import { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
@@ -98,7 +98,7 @@ export function InternshipForm({
   const [pending, startTransition] = useTransition()
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: {
       name: initial?.name ?? '',
       demandId: initial?.demandId ?? '',
@@ -213,7 +213,7 @@ export function InternshipForm({
                 value={field.value ?? ''}
                 onChange={field.onChange}
                 onBlur={field.onBlur}
-                placeholder="Describe the internship, responsibilities, and expectations…"
+                placeholder="Describe the internship, responsibilities, and expectations”¦"
               />
               {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
             </Field>
@@ -346,7 +346,7 @@ export function InternshipForm({
               <Input
                 {...field}
                 id="jdUrl"
-                placeholder="https://…"
+                placeholder="https://”¦"
                 value={field.value ?? ''}
               />
               {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
@@ -384,7 +384,7 @@ export function InternshipForm({
                 <Input
                   {...field}
                   id="examinerPhotoUrl"
-                  placeholder="https://…"
+                  placeholder="https://”¦"
                   value={field.value ?? ''}
                 />
                 {fieldState.invalid && (
@@ -433,8 +433,8 @@ export function InternshipForm({
         <Button type="submit" disabled={pending}>
           {pending
             ? mode === 'create'
-              ? 'Creating…'
-              : 'Saving…'
+              ? 'Creating”¦'
+              : 'Saving”¦'
             : mode === 'create'
               ? 'Create Internship'
               : 'Save Changes'}

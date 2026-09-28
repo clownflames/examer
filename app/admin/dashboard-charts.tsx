@@ -233,10 +233,7 @@ export function ExamCompletionChart({
                   <Cell key={entry.status} fill={entry.fill} />
                 ))}
               </Pie>
-              <ChartLegend
-                content={<ChartLegendContent nameKey="status" />}
-                className="-translate-y-2 flex-wrap gap-2"
-              />
+              <ChartLegend content={<ChartLegendContent nameKey="status" />} />
             </PieChart>
           </ChartContainer>
         )}

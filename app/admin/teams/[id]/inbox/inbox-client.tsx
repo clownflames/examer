@@ -365,7 +365,7 @@ export function InboxClient({
               <Select
                 value={codeLang}
                 onValueChange={(v) => {
-                  setCodeLang(v)
+                  setCodeLang(v ?? 'javascript')
                   form.setValue('codeLanguage', v)
                 }}
               >
@@ -513,27 +513,31 @@ function MessageCard({
 
             {canDelete && (
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0"
-                    aria-label="Message actions"
-                  >
-                    <MoreVertical className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      aria-label="Message actions"
+                    >
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
                 <DropdownMenuContent align="end">
                   <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onSelect={(e) => e.preventDefault()}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </DropdownMenuItem>
-                    </AlertDialogTrigger>
+                    <AlertDialogTrigger
+                      render={
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onSelect={(e) => e.preventDefault()}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </DropdownMenuItem>
+                      }
+                    />
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>

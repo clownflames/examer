@@ -17,6 +17,9 @@ import {
   internshipFormSchema,
 } from './constants'
 
+// Re-exported so consumers can pull the row shape straight from this module.
+export type { InternshipRow, InternshipDetail }
+
 /* -------------------------------------------------------------------------- */
 /*  List                                                                       */
 /* -------------------------------------------------------------------------- */

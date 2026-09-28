@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { Metadata } from "next";
 import ProfilePageClient from "./ProfilePageClient";
 import { getMyProfile } from "./actions";
+import { getMyPayments } from "../actions";
 
 export const metadata: Metadata = {
   title: "Profile | InternBird",
@@ -14,9 +15,14 @@ export default async function ProfilePage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) redirect("/login");
 
-  const profileData = await getMyProfile();
+  const [profileData, payments] = await Promise.all([
+    getMyProfile(),
+    getMyPayments(),
+  ]);
 
   if (!profileData) redirect("/login");
 
-  return <ProfilePageClient initialData={profileData} />;
+  return (
+    <ProfilePageClient initialData={profileData} payments={payments} />
+  );
 }

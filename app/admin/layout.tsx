@@ -12,7 +12,7 @@ export default async function AdminLayout({
   const session = await auth.api.getSession({ headers: await headers() })
 
   if (!session?.user) redirect('/login')
-  if (session.user.role !== 'admin') redirect('/user')
+  if (session.user.role !== 'admin') redirect('/')
 
   return (
     <SidebarProvider>

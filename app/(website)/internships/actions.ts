@@ -1,16 +1,14 @@
-"use server";
+﻿"use server";
 
 import { db } from "@/db";
 import {
   internships,
   employeeDemand,
-  internshipRegistration,
-  user,
+  payments,
 } from "@/db/schema";
 import { eq, desc, asc, sql, and, or, ilike } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { revalidatePath } from "next/cache";
 
 // =====================================================
 // TYPES
@@ -106,22 +104,26 @@ export async function getAllInternships(params?: {
         demandId: internships.demandId,
         demandName: employeeDemand.name,
         demandIconUrl: employeeDemand.iconUrl,
-        registrationId: internshipRegistration.id,
       })
       .from(internships)
-      .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id))
-      .leftJoin(
-        internshipRegistration,
-        userId
-          ? sql`${internshipRegistration.internshipId} = ${internships.id} 
-                 AND ${internshipRegistration.userId} = ${userId}`
-          : sql`false`
-      );
+      .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id));
 
     const rows =
       conditions.length > 0
         ? await base.where(and(...conditions)).orderBy(orderBy)
         : await base.orderBy(orderBy);
+
+    // "Applied" means PAID everywhere — the payment decides, not a bare
+    // registration row. Fetched separately so retry attempts can never
+    // duplicate internship rows.
+    const paidIds = new Set<string>();
+    if (userId) {
+      const paidRows = await db
+        .selectDistinct({ internshipId: payments.internshipId })
+        .from(payments)
+        .where(and(eq(payments.userId, userId), eq(payments.status, "paid")));
+      for (const row of paidRows) paidIds.add(row.internshipId);
+    }
 
     return rows.map((r) => ({
       id: r.id,
@@ -140,7 +142,7 @@ export async function getAllInternships(params?: {
       demandId: r.demandId,
       demandName: r.demandName,
       demandIconUrl: r.demandIconUrl,
-      isRegistered: !!r.registrationId,
+      isRegistered: paidIds.has(r.id),
       daysLeft: calcDaysLeft(r.lastSubmissionDate),
     }));
   } catch (error) {
@@ -174,81 +176,3 @@ export async function getDemandFilters(): Promise<DemandFilter[]> {
   }
 }
 
-// =====================================================
-// APPLY (same as global, but scoped here)
-// =====================================================
-export type ApplyResult =
-  | { success: true; message: string }
-  | { success: false; error: string; requiresLogin?: boolean };
-
-export async function applyToInternship(
-  internshipId: string,
-  coverLetter: string,
-  resumeUrl: string
-): Promise<ApplyResult> {
-  try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-
-    if (!session?.user?.id) {
-      return {
-        success: false,
-        error: "Please login to apply",
-        requiresLogin: true,
-      };
-    }
-
-    if (!internshipId) return { success: false, error: "Invalid internship" };
-
-    const plain = coverLetter
-      .replace(/<[^>]*>/g, "")
-      .replace(/&nbsp;/g, " ")
-      .trim();
-
-    if (plain.length < 20) {
-      return {
-        success: false,
-        error: "Cover letter must be at least 20 characters",
-      };
-    }
-
-    if (!resumeUrl.trim()) {
-      return { success: false, error: "Resume URL is required" };
-    }
-
-    const existing = await db
-      .select({ id: internshipRegistration.id })
-      .from(internshipRegistration)
-      .where(
-        and(
-          eq(internshipRegistration.userId, session.user.id),
-          eq(internshipRegistration.internshipId, internshipId)
-        )
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      return {
-        success: false,
-        error: "You have already applied to this internship",
-      };
-    }
-
-    await db.insert(internshipRegistration).values({
-      id: crypto.randomUUID(),
-      userId: session.user.id,
-      internshipId,
-      coverLetter: coverLetter.trim(),
-      resumeUrl: resumeUrl.trim(),
-    });
-
-    revalidatePath("/internships");
-    revalidatePath("/");
-
-    return { success: true, message: "Application submitted successfully!" };
-  } catch (error) {
-    console.error("applyToInternship error:", error);
-    return { success: false, error: "Something went wrong. Please try again." };
-  }
-}

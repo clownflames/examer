@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import {
@@ -8,8 +8,9 @@ import {
   Search,
   Clock,
   TrendingUp,
-  Users,
   Trophy,
+  CheckCircle2,
+  ArrowUpRight,
 } from "lucide-react";
 
 import {
@@ -19,6 +20,8 @@ import {
   type DemandFilter,
   type SortOption,
 } from "./actions";
+import { useSession } from "@/lib/auth-client";
+import ApplyDrawer from "../components/ApplyDrawer";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,7 +45,6 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import InternshipDetailDrawer from "./InternshipDetailDrawer";
 
 // =====================================================
 // HELPERS
@@ -143,9 +145,13 @@ function PriceCell({
 // MAIN
 // =====================================================
 export default function InternshipsPageClient() {
+  const { data: session, isPending: sessionLoading } = useSession();
+  const isLoggedIn = !!session?.user;
+
   const [data, setData] = useState<InternshipCard[]>([]);
   const [demands, setDemands] = useState<DemandFilter[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const [loadingDemands, setLoadingDemands] = useState(true);
 
   const [search, setSearch] = useState("");
@@ -166,17 +172,25 @@ export default function InternshipsPageClient() {
     return () => clearTimeout(t);
   }, [search]);
 
-  useEffect(() => {
-    setLoading(true);
-    getAllInternships({
-      demandId: activeDemand,
-      search: debouncedSearch,
-      sort,
-    }).then((res) => {
+  const load = useCallback(() => {
+    startTransition(async () => {
+      const res = await getAllInternships({
+        demandId: activeDemand,
+        search: debouncedSearch,
+        sort,
+      });
       setData(res);
-      setLoading(false);
+      setHasLoaded(true);
     });
   }, [activeDemand, debouncedSearch, sort]);
+
+  useEffect(() => {
+    if (sessionLoading) return;
+    load();
+  }, [sessionLoading, session?.user?.id, load]);
+
+  // Skeleton only while there is genuinely nothing to show yet.
+  const loading = sessionLoading || isPending || !hasLoaded;
 
   const selected = useMemo(
     () => data.find((d) => d.id === openId) ?? null,
@@ -462,12 +476,16 @@ export default function InternshipsPageClient() {
                               variant="outline"
                               className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                             >
+                              <CheckCircle2 className="w-3 h-3" />
                               Applied
                             </Badge>
                           ) : (item.daysLeft ?? 1) < 0 ? (
                             <Badge variant="outline">Closed</Badge>
                           ) : (
-                            <Badge variant="secondary">Open</Badge>
+                            <Badge variant="secondary" className="gap-1">
+                              Open
+                              <ArrowUpRight className="w-3 h-3" />
+                            </Badge>
                           )}
                         </TableCell>
                       </TableRow>
@@ -529,7 +547,12 @@ export default function InternshipsPageClient() {
                               variant="outline"
                               className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-[10px]"
                             >
+                              <CheckCircle2 className="w-2.5 h-2.5" />
                               Applied
+                            </Badge>
+                          ) : (item.daysLeft ?? 1) < 0 ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Closed
                             </Badge>
                           ) : (
                             <Badge
@@ -551,9 +574,31 @@ export default function InternshipsPageClient() {
       </section>
 
       {/* ============ DRAWER ============ */}
-      <InternshipDetailDrawer
-        internship={selected}
+      <ApplyDrawer
+        open={!!selected}
         onClose={() => setOpenId(null)}
+        internship={
+          selected
+            ? {
+                id: selected.id,
+                name: selected.name,
+                demandName: selected.demandName,
+                demandIconUrl: selected.demandIconUrl,
+                description: selected.description,
+                jdUrl: selected.jdUrl,
+                startDate: selected.startDate,
+                endDate: selected.endDate,
+                lastSubmissionDate: selected.lastSubmissionDate,
+                sellingPrice: selected.sellingPrice,
+                price: selected.price,
+                totalScore: selected.totalScore,
+                examinerName: selected.examinerName,
+                examinerPhotoUrl: selected.examinerPhotoUrl,
+              }
+            : null
+        }
+        isLoggedIn={isLoggedIn}
+        onPaid={load}
       />
     </div>
   );
