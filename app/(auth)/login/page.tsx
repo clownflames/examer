@@ -37,7 +37,7 @@ const formSchema = z.object({
 
 /** Route based on the signed-in user's role. */
 function getRedirectPath(role?: string | null) {
-  return role === 'admin' ? '/admin' : '/user'
+  return role === 'admin' ? '/admin' : '/'
 }
 
 function GoogleIcon({ className }: { className?: string }) {

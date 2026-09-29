@@ -119,39 +119,50 @@ export function AudioRecorder({
   /* -------------------- upload -------------------- */
 
   async function handleUpload(blob: Blob) {
-    setState('uploading')
-    try {
-      const presignRes = await getUploadPresignedUrl({
-        examId,
-        questionId,
-        contentType: blob.type || 'audio/webm',
-      })
+  setState('uploading')
+  try {
+    console.log('[Upload] Blob:', { size: blob.size, type: blob.type })
 
-      if (!presignRes.success) {
-        throw new Error(presignRes.error)
-      }
+    const presignRes = await getUploadPresignedUrl({
+      examId,
+      questionId,
+      contentType: blob.type || 'audio/webm',
+    })
 
-      const putRes = await fetch(presignRes.uploadUrl, {
-        method: 'PUT',
-        body: blob,
-        headers: { 'Content-Type': blob.type || 'audio/webm' },
-      })
+    console.log('[Upload] Presign response:', presignRes)
 
-      if (!putRes.ok) {
-        throw new Error('Upload failed')
-      }
-
-      setAudioUrl(presignRes.publicUrl)
-      onChange(presignRes.publicUrl)
-      setState('uploaded')
-      toast.success('Voice answer uploaded')
-    } catch (err) {
-      console.error(err)
-      setError('Could not upload your recording. Please try again.')
-      setState('idle')
-      toast.error('Upload failed')
+    if (!presignRes.success) {
+      throw new Error(`Presign failed: ${presignRes.error}`)
     }
+
+    const putRes = await fetch(presignRes.uploadUrl, {
+      method: 'PUT',
+      body: blob,
+      headers: { 'Content-Type': blob.type || 'audio/webm' },
+    })
+
+    console.log('[Upload] PUT response:', {
+      status: putRes.status,
+      statusText: putRes.statusText,
+    })
+
+    if (!putRes.ok) {
+      const text = await putRes.text().catch(() => '')
+      throw new Error(`Upload failed (${putRes.status}): ${text || putRes.statusText}`)
+    }
+
+    setAudioUrl(presignRes.publicUrl)
+    onChange(presignRes.publicUrl)
+    setState('uploaded')
+    toast.success('Voice answer uploaded')
+  } catch (err) {
+    console.error('[Upload] Failed:', err)
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    setError(`Could not upload: ${msg}`)
+    setState('idle')
+    toast.error(msg)
   }
+}
 
   /* -------------------- delete -------------------- */
 
