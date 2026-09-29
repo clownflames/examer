@@ -3,7 +3,7 @@
 import { useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Trash2, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 
@@ -37,7 +37,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { deleteInternship, type InternshipRow } from './actions'
+import {
+  deleteInternship,
+  toggleInternshipVisibility,
+  type InternshipRow,
+} from './actions'
 
 export function InternshipsTable({
   data,
@@ -75,6 +79,7 @@ export function InternshipsTable({
               <TableHead>Name</TableHead>
               <TableHead>Total Registrations</TableHead>
               <TableHead>Demand Name</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Created At</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -82,13 +87,20 @@ export function InternshipsTable({
           <TableBody>
             {data.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
+                <TableCell colSpan={7} className="h-24 text-center">
                   No internships found.
                 </TableCell>
               </TableRow>
             ) : (
               data.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className={
+                    row.isPublic
+                      ? undefined
+                      : 'bg-amber-500/10 dark:bg-amber-400/10 backdrop-blur-sm border-l-2 border-l-amber-500/60 dark:border-l-amber-400/70 hover:bg-amber-500/15 dark:hover:bg-amber-400/15 transition-colors'
+                  }
+                >
                   <TableCell className="text-muted-foreground font-mono text-xs">
                     {row.id.slice(0, 8)}
                   </TableCell>
@@ -101,11 +113,20 @@ export function InternshipsTable({
                   <TableCell className="text-muted-foreground">
                     {row.demandName ?? '—'}
                   </TableCell>
+                  <TableCell>
+                    <Badge variant={row.isPublic ? 'default' : 'outline'}>
+                      {row.isPublic ? 'Public' : 'Private'}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {format(new Date(row.createdAt), 'MMM d, yyyy')}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      <ToggleVisibilityButton
+                        id={row.id}
+                        isPublic={row.isPublic}
+                      />
                       <Button
                         variant="ghost"
                         size="icon"
@@ -201,6 +222,60 @@ function getPageNumbers(current: number, total: number): (number | '…')[] {
   pages.push(total)
   return pages
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Toggle Visibility Button                                                   */
+/* -------------------------------------------------------------------------- */
+
+function ToggleVisibilityButton({
+  id,
+  isPublic,
+}: {
+  id: string
+  isPublic: boolean
+}) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+
+  function handleToggle() {
+    startTransition(async () => {
+      const result = await toggleInternshipVisibility(id, !isPublic)
+      if (result.success) {
+        toast.success(
+          result.isPublic
+            ? 'Internship is now public.'
+            : 'Internship is now private.'
+        )
+        router.refresh()
+      } else {
+        toast.error(result.error ?? 'Failed to update visibility.')
+      }
+    })
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={handleToggle}
+      disabled={pending}
+      aria-label={isPublic ? 'Make private' : 'Make public'}
+      title={isPublic ? 'Make private' : 'Make public'}
+    >
+      {pending ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : isPublic ? (
+        <Eye className="h-4 w-4 text-emerald-600" />
+      ) : (
+        <EyeOff className="h-4 w-4 text-muted-foreground" />
+      )}
+    </Button>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Delete Button                                                              */
+/* -------------------------------------------------------------------------- */
 
 function DeleteButton({ id }: { id: string }) {
   const router = useRouter()

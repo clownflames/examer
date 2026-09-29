@@ -156,6 +156,8 @@ export const internships = pgTable(
 
     totalScore: integer("total_score").default(100).notNull(),
 
+    isPublic: boolean("is_public").default(false).notNull(),
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -166,7 +168,6 @@ export const internships = pgTable(
     index("internships_demand_id_idx").on(table.demandId),
   ],
 );
-
 // =====================================================
 // INTERNSHIP REGISTRATION
 // =====================================================
@@ -230,6 +231,8 @@ export const exams = pgTable(
     totalMarks: integer("total_marks").default(100).notNull(),
 
     passingMarks: integer("passing_marks"),
+
+    isPublic: boolean("is_public").default(false).notNull(),
 
     createdAt: timestamp("created_at")
       .defaultNow()

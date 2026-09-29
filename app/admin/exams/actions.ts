@@ -41,6 +41,7 @@ export async function getExams(page = 1): Promise<{
       duration: exams.duration,
       totalMarks: exams.totalMarks,
       passingMarks: exams.passingMarks,
+      isPublic: exams.isPublic,
       createdAt: exams.createdAt,
       questionCount: questionCount.as('question_count'),
     })
@@ -66,6 +67,7 @@ export async function getExams(page = 1): Promise<{
       totalMarks: Number(r.totalMarks),
       passingMarks: r.passingMarks != null ? Number(r.passingMarks) : null,
       questionCount: Number(r.questionCount ?? 0),
+      isPublic: r.isPublic,
       createdAt: r.createdAt,
     })),
     page: safePage,
@@ -89,6 +91,7 @@ export async function getExamById(id: string) {
       duration: exams.duration,
       totalMarks: exams.totalMarks,
       passingMarks: exams.passingMarks,
+      isPublic: exams.isPublic,
     })
     .from(exams)
     .where(eq(exams.id, id))
@@ -199,6 +202,39 @@ export async function deleteExam(id: string) {
   } catch (err) {
     console.error('deleteExam failed:', err)
     return { success: false as const, error: 'Failed to delete exam.' }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Toggle Visibility (public / private)                                       */
+/* -------------------------------------------------------------------------- */
+
+export async function toggleExamVisibility(
+  id: string,
+  isPublic: boolean
+): Promise<
+  { success: true; isPublic: boolean } | { success: false; error: string }
+> {
+  try {
+    const updated = await db
+      .update(exams)
+      .set({ isPublic })
+      .where(eq(exams.id, id))
+      .returning({ id: exams.id, isPublic: exams.isPublic })
+
+    if (updated.length === 0) {
+      return { success: false as const, error: 'Exam not found.' }
+    }
+
+    revalidatePath('/admin/exams')
+    // user side bhi refresh ho jaye
+    revalidatePath('/')
+    revalidatePath('/internships')
+
+    return { success: true as const, isPublic: updated[0].isPublic }
+  } catch (err) {
+    console.error('toggleExamVisibility failed:', err)
+    return { success: false as const, error: 'Failed to update visibility.' }
   }
 }
 

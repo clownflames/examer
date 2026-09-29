@@ -108,11 +108,15 @@ function fmtDuration(start: Date | null, end: Date | null) {
   return `${months} months`;
 }
 
-function inr(rupees: number) {
-  return `‚¹${rupees.toLocaleString("en-IN", {
-    minimumFractionDigits: rupees % 1 === 0 ? 0 : 2,
+function inr(rupees: number): string {
+  const hasDecimals = rupees % 1 !== 0;
+
+  return rupees.toLocaleString("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: hasDecimals ? 2 : 0,
     maximumFractionDigits: 2,
-  })}`;
+  });
 }
 
 function deadlineVariant(d: Date | null) {
@@ -305,10 +309,10 @@ export default function ApplyDrawer({
   const phase: DrawerState = closed
     ? "closed"
     : !isLoggedIn
-    ? "form"
-    : resolvedFor === internshipId
-    ? state
-    : "loading";
+      ? "form"
+      : resolvedFor === internshipId
+        ? state
+        : "loading";
 
   const plainTextLength = stripHtml(coverLetter).length;
 
@@ -439,11 +443,11 @@ export default function ApplyDrawer({
           setRegStatus((prev) =>
             prev
               ? {
-                  ...prev,
-                  state: "paid",
-                  paidAt: new Date().toISOString(),
-                  amountPaid: 0,
-                }
+                ...prev,
+                state: "paid",
+                paidAt: new Date().toISOString(),
+                amountPaid: 0,
+              }
               : prev
           );
           const list = await loadExams(internship.id);
@@ -494,10 +498,10 @@ export default function ApplyDrawer({
     phase === "exams"
       ? "Your Exams"
       : phase === "payment"
-      ? "Complete Payment"
-      : phase === "closed"
-      ? "Applications Closed"
-      : "Apply for Internship";
+        ? "Complete Payment"
+        : phase === "closed"
+          ? "Applications Closed"
+          : "Apply for Internship";
 
   const amountDueRupees = (regStatus?.amountDue ?? 0);
 
@@ -603,7 +607,7 @@ export default function ApplyDrawer({
                         About
                       </h3>
                       <div
-                        className="rich-text text-sm text-foreground/80 leading-relaxed"
+                        className="rich-text text-sm tiptap text-foreground/80 leading-relaxed"
                         dangerouslySetInnerHTML={{
                           __html: internship.description,
                         }}
@@ -836,7 +840,7 @@ export default function ApplyDrawer({
                             </span>
                             {amountDueRupees > 0 &&
                               Number(internship?.price ?? 0) >
-                                amountDueRupees && (
+                              amountDueRupees && (
                                 <span className="text-xs text-muted-foreground line-through ml-2 shrink-0">
                                   {inr(Number(internship?.price ?? 0))}
                                 </span>
@@ -1051,27 +1055,32 @@ export default function ApplyDrawer({
                                         </p>
                                       )}
 
-                                    <Button
-                                      size="sm"
-                                      variant={
-                                        exam.attempted
-                                          ? "outline"
-                                          : "default"
-                                      }
-                                      className="w-full"
-                                      render={
-                                        <Link
-                                          href={`/exams/${exam.id}/start`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                        >
-                                          <PlayCircle className="w-3.5 h-3.5" />
-                                          {exam.attempted
-                                            ? "Retake Exam"
-                                            : "Start Exam"}
-                                        </Link>
-                                      }
-                                    />
+                                    {exam.attempted ? (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="w-full"
+                                        disabled
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5" />
+                                        Already Attempted
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        className="w-full"
+                                        render={
+                                          <Link
+                                            href={`/exams/${exam.id}/start`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                          >
+                                            <PlayCircle className="w-3.5 h-3.5" />
+                                            Start Exam
+                                          </Link>
+                                        }
+                                      />
+                                    )}
                                   </div>
                                 </div>
                               </CardContent>

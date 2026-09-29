@@ -2,7 +2,16 @@
 
 import * as React from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { Clock, FileQuestion, Pencil, Plus, Trash2 } from 'lucide-react'
+import {
+  Clock,
+  Eye,
+  EyeOff,
+  FileQuestion,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 
@@ -46,7 +55,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ExamDrawerForm } from './exam-drawer-form'
 import { ExamQuestionsDrawer } from './exam-questions-drawer'
-import { deleteExam } from './actions'
+import { deleteExam, toggleExamVisibility } from './actions'
 import type { ExamRow, InternshipOption } from './constants'
 
 /* -------------------------------------------------------------------------- */
@@ -131,6 +140,7 @@ export function ExamsTable({
               <TableHead>Duration</TableHead>
               <TableHead>Marks</TableHead>
               <TableHead>Questions</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -139,7 +149,7 @@ export function ExamsTable({
             {data.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-muted-foreground h-24 text-center"
                 >
                   No exams found. Click <strong>Create Exam</strong> to add one.
@@ -147,7 +157,14 @@ export function ExamsTable({
               </TableRow>
             ) : (
               data.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className={
+                    row.isPublic
+                      ? undefined
+                      : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/30'
+                  }
+                >
                   <TableCell>
                     <Badge variant="outline" className="tabular-nums">
                       #{row.orderNo}
@@ -180,11 +197,20 @@ export function ExamsTable({
                       questionCount={row.questionCount}
                     />
                   </TableCell>
+                  <TableCell>
+                    <Badge variant={row.isPublic ? 'default' : 'outline'}>
+                      {row.isPublic ? 'Public' : 'Private'}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {format(new Date(row.createdAt), 'MMM d, yyyy')}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      <ToggleVisibilityButton
+                        id={row.id}
+                        isPublic={row.isPublic}
+                      />
                       <EditExamButton
                         examId={row.id}
                         internshipOptions={internshipOptions}
@@ -314,9 +340,7 @@ function QuestionsButton({
           </DrawerDescription>
         </DrawerHeader>
         <div className="overflow-y-auto px-4 pb-6">
-          <ExamQuestionsDrawer
-            examId={examId}
-          />
+          <ExamQuestionsDrawer examId={examId} />
         </div>
       </DrawerContent>
     </Drawer>
@@ -368,6 +392,57 @@ function EditExamButton({
         </div>
       </DrawerContent>
     </Drawer>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Toggle Visibility Button                                                   */
+/* -------------------------------------------------------------------------- */
+
+function ToggleVisibilityButton({
+  id,
+  isPublic,
+}: {
+  id: string
+  isPublic: boolean
+}) {
+  const router = useRouter()
+  const [pending, setPending] = React.useState(false)
+
+  async function handleToggle() {
+    setPending(true)
+    const result = await toggleExamVisibility(id, !isPublic)
+    setPending(false)
+
+    if (result.success) {
+      toast.success(
+        result.isPublic
+          ? 'Exam is now public.'
+          : 'Exam is now private.'
+      )
+      router.refresh()
+    } else {
+      toast.error(result.error ?? 'Failed to update visibility.')
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={handleToggle}
+      disabled={pending}
+      aria-label={isPublic ? 'Make private' : 'Make public'}
+      title={isPublic ? 'Make private' : 'Make public'}
+    >
+      {pending ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : isPublic ? (
+        <Eye className="h-4 w-4 text-emerald-600" />
+      ) : (
+        <EyeOff className="text-muted-foreground h-4 w-4" />
+      )}
+    </Button>
   )
 }
 

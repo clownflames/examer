@@ -72,6 +72,7 @@ export async function getInternships(): Promise<InternshipListItem[]> {
       })
       .from(internships)
       .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id))
+      .where(eq(internships.isPublic, true))
       .orderBy(desc(internships.createdAt))
       .limit(20);
 
@@ -79,7 +80,7 @@ export async function getInternships(): Promise<InternshipListItem[]> {
 
     return rows.map((r) => ({
       ...r,
-      isRegistered: paidIds.has(r.id), // œ… sirf paid users ko "Applied"
+      isRegistered: paidIds.has(r.id), // ✅ sirf paid users ko "Applied"
     }));
   } catch (error) {
     console.error("getInternships error:", error);
@@ -230,7 +231,8 @@ export async function getHomeStats(): Promise<HomeStats> {
 
     const [internshipsCount] = await db
       .select({ count: sql<number>`count(*)::int` })
-      .from(internships);
+      .from(internships)
+      .where(eq(internships.isPublic, true));
 
     return {
       students: students?.count ?? 0,
@@ -270,6 +272,7 @@ export async function getFeaturedDemands(): Promise<DemandCard[]> {
         internshipCount: sql<number>`(
           SELECT COUNT(*)::int FROM ${internships}
           WHERE ${internships.demandId} = ${employeeDemand.id}
+            AND ${internships.isPublic} = true
         )`,
       })
       .from(employeeDemand)
@@ -319,7 +322,12 @@ export async function getUpcomingDeadlines(): Promise<UpcomingInternship[]> {
       })
       .from(internships)
       .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id))
-      .where(sql`${internships.lastSubmissionDate} > NOW()`)
+      .where(
+        and(
+          eq(internships.isPublic, true),
+          sql`${internships.lastSubmissionDate} > NOW()`
+        )
+      )
       .orderBy(internships.lastSubmissionDate)
       .limit(6);
 
@@ -632,6 +640,7 @@ export async function getDemandDetail(
         internshipCount: sql<number>`(
           SELECT COUNT(*)::int FROM ${internships}
           WHERE ${internships.demandId} = ${employeeDemand.id}
+            AND ${internships.isPublic} = true
         )`,
       })
       .from(employeeDemand)
@@ -1482,7 +1491,12 @@ export async function getInternshipExams(
         passingMarks: exams.passingMarks,
       })
       .from(exams)
-      .where(eq(exams.internshipId, internshipId))
+      .where(
+        and(
+          eq(exams.internshipId, internshipId),
+          eq(exams.isPublic, true)
+        )
+      )
       .orderBy(asc(exams.orderNo), asc(exams.createdAt));
 
     if (examRows.length === 0) return [];
@@ -1614,4 +1628,3 @@ export async function getMyPayments(): Promise<MyPayment[]> {
     return [];
   }
 }
-

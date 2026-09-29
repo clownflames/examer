@@ -45,6 +45,7 @@ export async function getInternships(page = 1): Promise<{
       name: internships.name,
       demandId: internships.demandId,
       demandName: employeeDemand.name,
+      isPublic: internships.isPublic,
       createdAt: internships.createdAt,
       totalRegistrations: registrationsCount.as('total_registrations'),
     })
@@ -67,6 +68,7 @@ export async function getInternships(page = 1): Promise<{
       name: r.name,
       demandId: r.demandId,
       demandName: r.demandName,
+      isPublic: r.isPublic,
       createdAt: r.createdAt,
       totalRegistrations: Number(r.totalRegistrations ?? 0),
     })),
@@ -98,6 +100,7 @@ export async function getInternshipById(
       examinerName: internships.examinerName,
       examinerPhotoUrl: internships.examinerPhotoUrl,
       totalScore: internships.totalScore,
+      isPublic: internships.isPublic,
       createdAt: internships.createdAt,
       updatedAt: internships.updatedAt,
     })
@@ -207,6 +210,37 @@ export async function deleteInternship(id: string) {
   } catch (err) {
     console.error('deleteInternship failed:', err)
     return { success: false as const, error: 'Failed to delete internship.' }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Toggle Visibility (public / private)                                       */
+/* -------------------------------------------------------------------------- */
+
+export async function toggleInternshipVisibility(
+  id: string,
+  isPublic: boolean
+): Promise<{ success: true; isPublic: boolean } | { success: false; error: string }> {
+  try {
+    const updated = await db
+      .update(internships)
+      .set({ isPublic })
+      .where(eq(internships.id, id))
+      .returning({ id: internships.id, isPublic: internships.isPublic })
+
+    if (updated.length === 0) {
+      return { success: false as const, error: 'Internship not found.' }
+    }
+
+    revalidatePath('/admin/internships')
+    // user side bhi refresh ho jaye
+    revalidatePath('/')
+    revalidatePath('/internships')
+
+    return { success: true as const, isPublic: updated[0].isPublic }
+  } catch (err) {
+    console.error('toggleInternshipVisibility failed:', err)
+    return { success: false as const, error: 'Failed to update visibility.' }
   }
 }
 

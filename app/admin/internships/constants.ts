@@ -29,6 +29,7 @@ export type InternshipRow = {
   totalRegistrations: number
   demandId: string
   demandName: string | null
+  isPublic: boolean
   createdAt: Date
 }
 
@@ -46,6 +47,7 @@ export type InternshipDetail = {
   examinerName: string | null
   examinerPhotoUrl: string | null
   totalScore: number
+  isPublic: boolean
   createdAt: Date
   updatedAt: Date
 }

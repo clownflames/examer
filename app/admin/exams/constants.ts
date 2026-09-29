@@ -37,6 +37,7 @@ export type ExamRow = {
   totalMarks: number
   passingMarks: number | null
   questionCount: number
+  isPublic: boolean
   createdAt: Date
 }
 
