@@ -144,3 +144,21 @@ export async function getR2ObjectStream(key: string) {
   );
   return res;
 }
+
+
+
+export function buildMediaKey(
+  userId: string,
+  fileName: string
+): string {
+  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
+  return `media/${userId}/${Date.now()}-${safe}`
+}
+
+export function buildDocumentKey(
+  documentId: string,
+  fileName = 'document.pdf'
+): string {
+  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
+  return `documents/${documentId}/${Date.now()}-${safe}`
+}

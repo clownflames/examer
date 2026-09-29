@@ -902,3 +902,75 @@ export const payments = pgTable("payments", {
   index("payments_internship_id_idx").on(table.internshipId),
   index("payments_razorpay_order_id_idx").on(table.razorpayOrderId),
 ]);
+
+
+export const documents = pgTable(
+  'documents',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    description: text('description'),
+
+    // Full document structure (JSON)
+    // { blocks: [...], theme: {...}, pageSize, orientation }
+    content: jsonb('content').notNull(),
+
+    // R2 URLs
+    pdfUrl: text('pdf_url'),        // generated PDF
+    pdfKey: text('pdf_key'),         // R2 key (delete ke liye)
+
+    // Meta
+    createdBy: text('created_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    isTemplate: boolean('is_template').default(false).notNull(),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('documents_created_by_idx').on(table.createdBy),
+    index('documents_created_at_idx').on(table.createdAt),
+  ],
+)
+
+
+
+export const mediaAssets = pgTable(
+  'media_assets',
+  {
+    id: text('id').primaryKey(),
+    fileName: text('file_name').notNull(),
+    originalName: text('original_name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    size: integer('size').notNull(), // bytes
+
+    url: text('url').notNull(), // public R2 URL
+    key: text('key').notNull(), // R2 key (delete ke liye)
+    width: integer('width'),
+    height: integer('height'),
+
+    tags: jsonb('tags').$type<string[]>().default([]),
+
+    // Who uploaded it
+    uploadedBy: text('uploaded_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    // Denormalized role — lets us query fast without a join
+    // values: 'admin' | 'user' (mirrors userRoleEnum)
+    uploadedByRole: userRoleEnum('uploaded_by_role')
+      .default('user')
+      .notNull(),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('media_assets_uploaded_by_idx').on(table.uploadedBy),
+    index('media_assets_uploaded_by_role_idx').on(table.uploadedByRole),
+    index('media_assets_created_at_idx').on(table.createdAt),
+    index('media_assets_mime_type_idx').on(table.mimeType),
+  ],
+)

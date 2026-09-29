@@ -21,6 +21,8 @@ import {
     Monitor,
     CreditCard,
     ClipboardCheck,
+    ImageIcon,
+    FileSignature,
 } from 'lucide-react'
 
 import {
@@ -57,16 +59,18 @@ import { authClient } from '@/lib/auth-client'
 type User = { name: string; email: string; image: string | null }
 
 const NAV_ITEMS = [
-    { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { label: 'Demands', href: '/admin/demands', icon: Layers },
-    { label: 'Internships', href: '/admin/internships', icon: Briefcase },
-    { label: 'Registrations', href: '/admin/registrations', icon: ClipboardList },
-    { label: 'Payments', href: '/admin/payments', icon: CreditCard },
-    { label: 'Exams', href: '/admin/exams', icon: FileText },
-    { label: 'Exam Submissions', href: '/admin/exam-submissions', icon: ClipboardCheck },
-    { label: 'Teams', href: '/admin/teams', icon: Users },
-    { label: 'Users', href: '/admin/users', icon: UserCog },
-    { label: 'Settings', href: '/admin/settings', icon: Settings },
+  { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+  { label: 'Demands', href: '/admin/demands', icon: Layers },
+  { label: 'Internships', href: '/admin/internships', icon: Briefcase },
+  { label: 'Registrations', href: '/admin/registrations', icon: ClipboardList },
+  { label: 'Payments', href: '/admin/payments', icon: CreditCard },
+  { label: 'Exams', href: '/admin/exams', icon: FileText },
+  { label: 'Exam Submissions', href: '/admin/exam-submissions', icon: ClipboardCheck },
+  { label: 'Teams', href: '/admin/teams', icon: Users },
+  { label: 'Users', href: '/admin/users', icon: UserCog },
+  { label: 'Media', href: '/admin/media', icon: ImageIcon },
+  { label: 'Documents', href: '/admin/documents', icon: FileSignature },
+  { label: 'Settings', href: '/admin/settings', icon: Settings },
 ]
 
 function getInitials(name?: string | null) {
