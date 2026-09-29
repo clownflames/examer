@@ -6,7 +6,16 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Public routes — no auth needed
-  const publicPaths = ['/', '/tierlist', '/internships', '/login', '/register', '/forgot-password']
+ const publicPaths = [
+  '/',
+  '/tierlist',
+  '/internships',
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',         // ← ye add karo
+  '/api/auth',               // ← ye bhi add karo (better-auth ke saare routes)
+]
   const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'))
   
   // Exam start — server side paid gate hai, login bhi server check karega
@@ -34,12 +43,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all paths except:
-     * - _next/static, _next/image
-     * - favicon, images, fonts
-     * - api routes
-     */
-    '/((?!_next/static|_next/image|favicon.ico|images|fonts|api|.*\\..*).*)',
+    '/((?!api/auth|_next/static|_next/image|favicon.ico|images|fonts|.*\\..*).*)',
   ],
 }
