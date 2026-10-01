@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Toaster } from "sonner";
+import NextTopLoader from 'nextjs-toploader';
 import { ThemeProvider } from "@/components/theme-provider";
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
@@ -29,9 +30,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", inter.variable)}
     >
+      <NextTopLoader
+        color="red"
+        showSpinner={false}
+        shadow="0 0 10px red, 0 0 5px red"
+      />
       <ThemeProvider
         attribute="class"
-        defaultTheme="system"
+        defaultTheme="dark"
         enableSystem
         disableTransitionOnChange
       >

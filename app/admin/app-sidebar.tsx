@@ -23,6 +23,7 @@ import {
     ClipboardCheck,
     ImageIcon,
     FileSignature,
+    Megaphone,
 } from 'lucide-react'
 
 import {
@@ -69,10 +70,10 @@ const NAV_ITEMS = [
   { label: 'Teams', href: '/admin/teams', icon: Users },
   { label: 'Users', href: '/admin/users', icon: UserCog },
   { label: 'Media', href: '/admin/media', icon: ImageIcon },
-  { label: 'Documents', href: '/admin/documents', icon: FileSignature },
+  { label: 'Documents', href: '/admin/documents-studio/list', icon: FileSignature },
+  { label: 'Announcements', href: '/admin/announcements', icon: Megaphone },
   { label: 'Settings', href: '/admin/settings', icon: Settings },
 ]
-
 function getInitials(name?: string | null) {
     if (!name) return 'A'
     const parts = name.trim().split(/\s+/)

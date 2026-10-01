@@ -974,3 +974,183 @@ export const mediaAssets = pgTable(
     index('media_assets_mime_type_idx').on(table.mimeType),
   ],
 )
+
+
+
+
+export const studioDocuments = pgTable(
+  'studio_documents',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    description: text('description'),
+
+    /**
+     * Craft.js serialized state.
+     * { ROOT: {...}, nodes: {...} }
+     */
+    craftJson: jsonb('craft_json').notNull(),
+
+    createdBy: text('created_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('studio_documents_created_by_idx').on(table.createdBy),
+    index('studio_documents_created_at_idx').on(table.createdAt),
+  ],
+)
+
+export const studioDocumentsRelations = relations(
+  studioDocuments,
+  ({ one }) => ({
+    createdByUser: one(user, {
+      fields: [studioDocuments.createdBy],
+      references: [user.id],
+    }),
+  })
+)
+
+
+
+
+
+
+
+
+// =====================================================
+// ANNOUNCEMENTS (top bar notifications)
+// =====================================================
+
+export const announcementVariantEnum = pgEnum('announcement_variant', [
+  'info',
+  'success',
+  'warning',
+  'error',
+])
+
+export const announcementKindEnum = pgEnum('announcement_kind', [
+  'announcement',
+  'popup',
+])
+
+export const popupPositionEnum = pgEnum('popup_position', [
+  'center',
+  'top',
+  'bottom',
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+])
+
+export const announcements = pgTable('announcements', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  variant: announcementVariantEnum('variant').default('info').notNull(),
+  isActive: boolean('is_active').default(false).notNull(),
+  dismissible: boolean('dismissible').default(true).notNull(),
+  displayOnce: boolean('display_once').default(false).notNull(),
+  startsAt: timestamp('starts_at'),
+  endsAt: timestamp('ends_at'),
+  targetPages: jsonb('target_pages').$type<string[]>().default([]).notNull(),
+  ctaText: text('cta_text'),
+  kind: announcementKindEnum('kind').default('announcement').notNull(),
+imageUrl: text('image_url'),
+position: popupPositionEnum('position').default('center').notNull(),
+  ctaUrl: text('cta_url'),
+  priority: integer('priority').default(0).notNull(),
+  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+})
+
+export const announcementsRelations = relations(
+  announcements,
+  ({ one }) => ({
+    createdByUser: one(user, {
+      fields: [announcements.createdBy],
+      references: [user.id],
+    }),
+  })
+)
+
+// =====================================================
+// POPUPS (modal-style announcements)
+// =====================================================
+
+
+
+export const popups = pgTable(
+  'popups',
+  {
+    id: text('id').primaryKey(),
+
+    title: text('title').notNull(),
+    content: text('content').notNull(), // HTML allowed
+
+    // Optional image shown above title
+    imageUrl: text('image_url'),
+
+    variant: announcementVariantEnum('variant')
+      .default('info')
+      .notNull(),
+
+    position: popupPositionEnum('position').default('center').notNull(),
+
+    isActive: boolean('is_active').default(false).notNull(),
+    dismissible: boolean('dismissible').default(true).notNull(),
+    displayOnce: boolean('display_once').default(false).notNull(),
+
+    // Auto-close after N seconds. null = never.
+    autoCloseSeconds: integer('auto_close_seconds'),
+
+    startsAt: timestamp('starts_at'),
+    endsAt: timestamp('ends_at'),
+
+    // Pages where it should show. Empty array = all pages.
+    targetPages: jsonb('target_pages')
+      .$type<string[]>()
+      .default([])
+      .notNull(),
+
+    // Optional CTAs (primary + secondary)
+    primaryCtaText: text('primary_cta_text'),
+    primaryCtaUrl: text('primary_cta_url'),
+
+    secondaryCtaText: text('secondary_cta_text'),
+    secondaryCtaUrl: text('secondary_cta_url'),
+
+    // Sorting — lower first
+    priority: integer('priority').default(0).notNull(),
+
+    createdBy: text('created_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('popups_is_active_idx').on(table.isActive),
+    index('popups_priority_idx').on(table.priority),
+    index('popups_created_at_idx').on(table.createdAt),
+  ],
+)
+
+export const popupsRelations = relations(popups, ({ one }) => ({
+  createdByUser: one(user, {
+    fields: [popups.createdBy],
+    references: [user.id],
+  }),
+}))

@@ -222,7 +222,7 @@ export default function Navigation() {
                   style={{ width: '40px' }}
                   alt="INTERNBIRD Logo"
                 />
-                <div className="flex gap-1">
+                <div className="flex gap-1 text-white">
                   INTERN<div className="text-primary">BIRD</div>
                 </div>
               </div>

@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -124,20 +125,24 @@ export function BlockList({
             }
           />
           <DropdownMenuContent align="end" className="w-60">
-            <DropdownMenuLabel>Add block</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {BLOCK_CATALOG.map((b) => (
-              <DropdownMenuItem
-                key={b.type}
-                onClick={() => addBlock(b.type)}
-                className="flex flex-col items-start gap-0.5"
-              >
-                <span className="text-sm font-medium">{b.label}</span>
-                <span className="text-muted-foreground text-[10px]">
-                  {b.description}
-                </span>
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuGroup>
+
+              <DropdownMenuLabel>Add block</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {BLOCK_CATALOG.map((b) => (
+                <DropdownMenuItem
+                  key={b.type}
+                  onClick={() => addBlock(b.type)}
+                  className="flex flex-col items-start gap-0.5"
+                >
+                  <span className="text-sm font-medium">{b.label}</span>
+                  <span className="text-muted-foreground text-[10px]">
+                    {b.description}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
