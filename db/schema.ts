@@ -1154,3 +1154,268 @@ export const popupsRelations = relations(popups, ({ one }) => ({
     references: [user.id],
   }),
 }))
+
+
+
+// =====================================================
+// CERTIFICATES
+// Issued certificates — user ko kisi internship/exam
+// complete karne par milte hain. `certificateNo` public
+// verification code hai (see /certificates/verify).
+// =====================================================
+
+export const certificateStatusEnum = pgEnum('certificate_status', [
+  'issued',
+  'revoked',
+])
+
+export const certificates = pgTable(
+  'certificates',
+  {
+    id: text('id').primaryKey(),
+
+    /**
+     * Public, human-readable verification code.
+     * Upar se bhi unique rakha hai taaki verify page par lookup fast rahe.
+     */
+    certificateNo: text('certificate_no').notNull().unique(),
+
+    // Owner — jis user ko certificate mila hai
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+
+    title: text('title').notNull(),
+    description: text('description'),
+
+    /**
+     * Certificate ka visual (R2 URL) — image ya pdf dono ho sakte hain.
+     */
+    imageUrl: text('image_url'),
+
+    /**
+     * Optional context — jis internship/exam se mila.
+     */
+    internshipId: text('internship_id').references(() => internships.id, {
+      onDelete: 'set null',
+    }),
+
+    issuedAt: timestamp('issued_at')
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp('expires_at'),
+
+    status: certificateStatusEnum('status').default('issued').notNull(),
+
+    // Admin ne kyun revoke kiya — audit ke liye
+    revokeReason: text('revoke_reason'),
+
+    createdBy: text('created_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('certificates_user_id_idx').on(table.userId),
+    index('certificates_certificate_no_idx').on(table.certificateNo),
+    index('certificates_status_idx').on(table.status),
+    index('certificates_created_at_idx').on(table.createdAt),
+  ],
+)
+
+export const certificatesRelations = relations(certificates, ({ one }) => ({
+  user: one(user, {
+    fields: [certificates.userId],
+    references: [user.id],
+  }),
+  internship: one(internships, {
+    fields: [certificates.internshipId],
+    references: [internships.id],
+  }),
+  createdByUser: one(user, {
+    fields: [certificates.createdBy],
+    references: [user.id],
+  }),
+}))
+
+
+
+// =====================================================
+// VERIFICATION REQUESTS
+// User apni certificate verify karne ki request bhejta
+// hai (e.g. employer ke liye). Admin approve/reject
+// karta hai.
+// =====================================================
+
+export const verificationStatusEnum = pgEnum('verification_status', [
+  'pending',
+  'approved',
+  'rejected',
+])
+
+export const verificationRequests = pgTable(
+  'verification_requests',
+  {
+    id: text('id').primaryKey(),
+
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+
+    // Kis certificate ke liye request hai (optional — kuch
+    // requests generic ho sakti hain)
+    certificateId: text('certificate_id').references(() => certificates.id, {
+      onDelete: 'cascade',
+    }),
+
+    // Employer / verifier ki details
+    verifierName: text('verifier_name').notNull(),
+    verifierEmail: text('verifier_email').notNull(),
+    organisation: text('organisation'),
+
+    // User ka message — "why do you need this?"
+    note: text('note'),
+
+    status: verificationStatusEnum('status').default('pending').notNull(),
+
+    // Admin ka response
+    reviewedBy: text('reviewed_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    reviewNote: text('review_note'),
+    reviewedAt: timestamp('reviewed_at'),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('verification_requests_user_id_idx').on(table.userId),
+    index('verification_requests_status_idx').on(table.status),
+    index('verification_requests_created_at_idx').on(table.createdAt),
+  ],
+)
+
+export const verificationRequestsRelations = relations(
+  verificationRequests,
+  ({ one }) => ({
+    user: one(user, {
+      fields: [verificationRequests.userId],
+      references: [user.id],
+    }),
+    certificate: one(certificates, {
+      fields: [verificationRequests.certificateId],
+      references: [certificates.id],
+    }),
+    reviewedByUser: one(user, {
+      fields: [verificationRequests.reviewedBy],
+      references: [user.id],
+    }),
+  }),
+)
+
+
+
+// =====================================================
+// OFFER LETTERS
+// Internship complete karne ke baad admin issue karta
+// hai. `offerNo` public reference code hai — verify page
+// par dekhne ke liye (same flow as certificates).
+// =====================================================
+
+export const offerLetterStatusEnum = pgEnum('offer_letter_status', [
+  'draft',
+  'issued',
+  'accepted',
+  'declined',
+  'revoked',
+])
+
+export const offerLetters = pgTable(
+  'offer_letters',
+  {
+    id: text('id').primaryKey(),
+
+    /**
+     * Public, human-readable reference code.
+     * Uniqueness neeche `offer_letters_offer_no_unique` index se aati hai.
+     */
+    offerNo: text('offer_no').notNull(),
+
+    // Letter kisko diya gaya
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+
+    // Kis internship ke liye
+    internshipId: text('internship_id').references(() => internships.id, {
+      onDelete: 'set null',
+    }),
+
+    // --- Letter body ---
+    companyName: text('company_name').notNull(),
+    designation: text('designation').notNull(),
+    location: text('location'),
+    /** Stipend / CTC — string rakha hai kyunki "Unpaid" bhi ho sakta hai */
+    compensation: text('compensation'),
+    joiningDate: timestamp('joining_date'),
+    duration: text('duration'),
+    /** Letter ka body — rich text HTML */
+    body: text('body'),
+
+    // Generated / uploaded letter (PDF ya image) — R2 URL
+    pdfUrl: text('pdf_url'),
+
+    issuedAt: timestamp('issued_at'),
+    /** Offer accept karne ka deadline */
+    expiresAt: timestamp('expires_at'),
+
+    status: offerLetterStatusEnum('status').default('draft').notNull(),
+
+    // --- User ka response ---
+    respondedAt: timestamp('responded_at'),
+    declineReason: text('decline_reason'),
+
+    // Admin ne kyun revoke kiya — audit ke liye
+    revokeReason: text('revoke_reason'),
+
+    createdBy: text('created_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('offer_letters_offer_no_unique').on(table.offerNo),
+    index('offer_letters_user_id_idx').on(table.userId),
+    index('offer_letters_internship_id_idx').on(table.internshipId),
+    index('offer_letters_status_idx').on(table.status),
+    index('offer_letters_created_at_idx').on(table.createdAt),
+  ],
+)
+
+export const offerLettersRelations = relations(offerLetters, ({ one }) => ({
+  user: one(user, {
+    fields: [offerLetters.userId],
+    references: [user.id],
+  }),
+  internship: one(internships, {
+    fields: [offerLetters.internshipId],
+    references: [internships.id],
+  }),
+  createdByUser: one(user, {
+    fields: [offerLetters.createdBy],
+    references: [user.id],
+  }),
+}))

@@ -75,7 +75,7 @@ export default function InboxPageClient({
   // Empty state — user has no teams
   if (teams.length === 0) {
     return (
-      <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center px-4">
+      <div className="flex min-h-[calc(100dvh-6rem)] items-center justify-center px-4 md:min-h-[calc(100vh-3.5rem)]">
         <div className="flex flex-col items-center text-center max-w-sm">
           <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
             <MessageSquare className="w-6 h-6 text-muted-foreground" />
@@ -90,7 +90,7 @@ export default function InboxPageClient({
   }
 
   return (
-    <div className="h-[calc(100vh-5rem)] flex">
+    <div className="flex h-[calc(100dvh-6rem)] md:h-[calc(100vh-3.5rem)]">
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex flex-col w-[300px] border-r bg-muted/20">
         <div className="px-4 py-3 border-b shrink-0">

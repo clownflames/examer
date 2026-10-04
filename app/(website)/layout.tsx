@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import Navigation from "./Navigation";
+import SmoothScroll from "@/components/smooth-scroll";
 import { AnnouncementBar, getActiveAnnouncements } from "./components/announcements";
 
 export const metadata: Metadata = {
@@ -16,10 +17,16 @@ export default async function WebsiteLayout({
 
   const announcements = await getActiveAnnouncements()
   return (
-    <>
-      {/* Main content with bottom padding so the nav doesn't overlap */}
-      <AnnouncementBar announcements={announcements} />
-      <main className="min-h-screen pb-24 md:pb-20">{children}</main>
+    <SmoothScroll>
+      {/*
+        Desktop pe nav bar fixed TOP pe hai (3.5rem / h-14) — isliye content ko
+        niche push karna padta hai. Mobile pe nav bottom pe fixed hai, sirf
+        bottom padding chahiye.
+      */}
+      <div className="md:pt-14">
+        <AnnouncementBar announcements={announcements} />
+        <main className="min-h-screen pb-24 md:pb-16">{children}</main>
+      </div>
 
       <Script
         src="https://checkout.razorpay.com/v1/checkout.js"
@@ -27,6 +34,6 @@ export default async function WebsiteLayout({
       />
 
       <Navigation />
-    </>
+    </SmoothScroll>
   );
 }

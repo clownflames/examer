@@ -94,7 +94,9 @@ export default function HeroSection() {
   };
 
   return (
-    <section className="relative w-full min-h-[calc(100vh-5rem)] overflow-hidden">
+    <section className="relative w-full min-h-[calc(100svh-4rem)] overflow-hidden md:min-h-[calc(100vh-3.5rem)]">
+      {/* Mobile: bottom nav (4rem) ke upar, Desktop: top nav (3.5rem) ke neeche */}
+
       {/* Background blobs */}
       <div className="absolute -top-40 -left-40 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute -bottom-40 right-0 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[120px] pointer-events-none" />

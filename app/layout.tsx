@@ -28,23 +28,33 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", inter.variable)}
     >
-      <NextTopLoader
-        color="red"
-        showSpinner={false}
-        shadow="0 0 10px red, 0 0 5px red"
-      />
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="dark"
-        enableSystem
-        disableTransitionOnChange
-      >
+      {/*
+        NextTopLoader, ThemeProvider aur Toaster — sab <body> ke andar.
+        Inke bahar rakhne par React unke <style>/<script>/<section> ko
+        <html> ka direct child bana deta hai, jo invalid HTML hai aur
+        hydration error deta hai.
+      */}
+      <body className="min-h-full flex flex-col">
+        <NextTopLoader
+          color="red"
+          showSpinner={false}
+          shadow="0 0 10px red, 0 0 5px red"
+        />
 
-        <body className="min-h-full flex flex-col">{children}</body>
-      </ThemeProvider>
-      <Toaster />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
+
+        <Toaster />
+      </body>
     </html>
   );
 }

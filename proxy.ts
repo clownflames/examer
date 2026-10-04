@@ -15,6 +15,10 @@ export async function proxy(request: NextRequest) {
   '/forgot-password',
   '/reset-password',         // ← ye add karo
   '/api/auth',               // ← ye bhi add karo (better-auth ke saare routes)
+  // Certificate verification is public - an employer verifying won't have a login.
+  // NOTE: '/certificates' itself stays protected (user's own list).
+  '/certificates/verify',
+  '/offer-letters/verify',
 ]
   const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'))
   

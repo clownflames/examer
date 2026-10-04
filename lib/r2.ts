@@ -162,3 +162,14 @@ export function buildDocumentKey(
   const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
   return `documents/${documentId}/${Date.now()}-${safe}`
 }
+
+/**
+ * Offer letter ka uploaded/generated PDF ya image.
+ */
+export function buildOfferLetterKey(
+  offerLetterId: string,
+  fileName = 'offer-letter.pdf'
+): string {
+  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, '_')
+  return `offer-letters/${offerLetterId}/${Date.now()}-${safe}`
+}

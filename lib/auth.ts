@@ -11,11 +11,11 @@ export const auth = betterAuth({
   }),
 
   // IMPORTANT: ye add karo
-  baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
-  trustedOrigins: [
-    "http://localhost:3000",
-    "https://internbird.sqrock.cloud",
-  ],
+  // baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  // trustedOrigins: [
+  //   "http://localhost:3000",
+  //   "https://internbird.sqrock.cloud",
+  // ],
 
   emailAndPassword: {
     enabled: true,

@@ -24,6 +24,7 @@ import {
     ImageIcon,
     FileSignature,
     Megaphone,
+    Award,
 } from 'lucide-react'
 
 import {
@@ -69,6 +70,9 @@ const NAV_ITEMS = [
   { label: 'Exam Submissions', href: '/admin/exam-submissions', icon: ClipboardCheck },
   { label: 'Teams', href: '/admin/teams', icon: Users },
   { label: 'Users', href: '/admin/users', icon: UserCog },
+  { label: 'Certificates', href: '/admin/certificates', icon: Award },
+  { label: 'Offer Letters', href: '/admin/offer-letters', icon: FileSignature },
+  { label: 'Verification Requests', href: '/admin/verification-requests', icon: ShieldCheck },
   { label: 'Media', href: '/admin/media', icon: ImageIcon },
   { label: 'Documents', href: '/admin/documents-studio/list', icon: FileSignature },
   { label: 'Announcements', href: '/admin/announcements', icon: Megaphone },
