@@ -3,6 +3,7 @@ import Script from "next/script";
 import Navigation from "./Navigation";
 import SmoothScroll from "@/components/smooth-scroll";
 import { AnnouncementBar, getActiveAnnouncements } from "./components/announcements";
+import ProfileCompletionReminder from "./components/profile-completion-reminder";
 
 export const metadata: Metadata = {
   title: "InternBird",
@@ -32,6 +33,10 @@ export default async function WebsiteLayout({
         src="https://checkout.razorpay.com/v1/checkout.js"
         strategy="lazyOnload"
       />
+
+      {/* Nudges signed-in students whose profile is still incomplete.
+          Self-checks on mount so the layout stays statically renderable. */}
+      <ProfileCompletionReminder />
 
       <Navigation />
     </SmoothScroll>

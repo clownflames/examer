@@ -10,11 +10,13 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { MediaPicker } from '@/components/admin/media-picker'
 import {
   Select,
   SelectContent,
@@ -264,7 +266,7 @@ export function InternshipForm({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid}>
                 <FieldLabel htmlFor="lastSubmissionDate">
-                  Last Submission
+                  Registrations Close
                 </FieldLabel>
                 <Input
                   {...field}
@@ -272,6 +274,11 @@ export function InternshipForm({
                   type="date"
                   value={field.value ?? ''}
                 />
+                <FieldDescription>
+                  After this date nobody new can apply. Students who already
+                  registered keep their access — they can still pay and sit the
+                  exam. Leave empty to keep registrations open.
+                </FieldDescription>
                 {fieldState.invalid && (
                   <FieldError errors={[fieldState.error]} />
                 )}
@@ -379,7 +386,7 @@ export function InternshipForm({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid}>
                 <FieldLabel htmlFor="examinerPhotoUrl">
-                  Examiner Photo URL
+                  Or paste a photo URL
                 </FieldLabel>
                 <Input
                   {...field}
@@ -394,6 +401,29 @@ export function InternshipForm({
             )}
           />
         </div>
+
+        {/* Examiner photo — pick from the media library or upload a new one */}
+        <Controller
+          name="examinerPhotoUrl"
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={fieldState.invalid}>
+              <FieldLabel>Examiner Photo</FieldLabel>
+              <MediaPicker
+                value={field.value || null}
+                onChange={(url) => field.onChange(url)}
+                label="Examiner photo"
+              />
+              <FieldDescription>
+                Optional. Pick an existing image from your media library or
+                upload a new one.
+              </FieldDescription>
+              {fieldState.invalid && (
+                <FieldError errors={[fieldState.error]} />
+              )}
+            </Field>
+          )}
+        />
 
         {/* Total Score */}
         <Controller

@@ -602,6 +602,90 @@ export const examSubmissionRelations = relations(
   }),
 );
 
+// =====================================================
+// EXAM NOTIFICATIONS
+// When an admin announces a new exam, every student who has paid for that
+// internship gets an email. One row per (exam, student) so delivery can be
+// audited later — including the ones that never made it out.
+// =====================================================
+
+export const examNotificationStatusEnum = pgEnum("exam_notification_status", [
+  /** Row written, send not attempted yet. */
+  "queued",
+  /** Resend accepted it — still in flight. */
+  "sent",
+  /** Resend confirmed it landed in the mailbox. */
+  "delivered",
+  /** Our send attempt errored. */
+  "failed",
+  /** Hard bounce — mailbox does not exist. */
+  "bounced",
+  /** Recipient marked it as spam. */
+  "complained",
+]);
+
+export const examNotifications = pgTable(
+  "exam_notifications",
+  {
+    id: text("id").primaryKey(),
+
+    examId: text("exam_id")
+      .notNull()
+      .references(() => exams.id, { onDelete: "cascade" }),
+
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+
+    /** Snapshot of the address at send time so we can explain failures later. */
+    recipientEmail: text("recipient_email").notNull(),
+
+    status: examNotificationStatusEnum("status").default("queued").notNull(),
+
+    /** Resend's message id — lets us poll real delivery status later. */
+    providerId: text("provider_id"),
+
+    error: text("error"),
+
+    attempts: integer("attempts").default(0).notNull(),
+
+    sentAt: timestamp("sent_at"),
+    deliveredAt: timestamp("delivered_at"),
+    failedAt: timestamp("failed_at"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    // One notification per student per exam — re-notifying updates the row
+    // instead of stacking duplicates.
+    uniqueIndex("exam_notifications_exam_user_unique").on(
+      table.examId,
+      table.userId
+    ),
+    index("exam_notifications_exam_id_idx").on(table.examId),
+    index("exam_notifications_status_idx").on(table.status),
+    index("exam_notifications_user_id_idx").on(table.userId),
+  ],
+);
+
+export const examNotificationsRelations = relations(
+  examNotifications,
+  ({ one }) => ({
+    exam: one(exams, {
+      fields: [examNotifications.examId],
+      references: [exams.id],
+    }),
+    user: one(user, {
+      fields: [examNotifications.userId],
+      references: [user.id],
+    }),
+  }),
+);
+
 // ---------- QUESTION SUBMISSION ----------
 
 export const questionSubmissionRelations = relations(

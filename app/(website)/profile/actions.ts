@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 
 // =====================================================
 // TYPES
@@ -68,22 +69,117 @@ export type ProfileData = {
 // =====================================================
 // CALCULATE COMPLETION
 // =====================================================
-function calcCompletion(p: Partial<ProfileData>): number {
-  const checks = [
-    p.headline,
-    p.bio,
-    p.phone,
-    p.collegeName,
-    p.degree,
-    p.branch,
-    p.graduationYear,
-    p.city,
-    p.linkedinUrl || p.githubUrl,
-    (p.skills?.length ?? 0) > 0,
-    p.resumeUrl,
-  ];
-  const filled = checks.filter(Boolean).length;
-  return Math.round((filled / checks.length) * 100);
+
+/**
+ * Single source of truth for "is this profile finished?". The completion
+ * percentage AND the reminder popup's checklist both read from here, so the
+ * bar and the list can never drift apart.
+ */
+type CompletionCheck = {
+  label: string;
+  isDone: (p: CompletionFields) => boolean;
+};
+
+/**
+ * The subset of profile fields completion depends on. Deliberately allows
+ * `null` so it accepts both `ProfileData` and a raw (sparse) DB row.
+ */
+type CompletionFields = {
+  headline?: string | null;
+  bio?: string | null;
+  phone?: string | null;
+  collegeName?: string | null;
+  degree?: string | null;
+  branch?: string | null;
+  graduationYear?: number | null;
+  city?: string | null;
+  linkedinUrl?: string | null;
+  githubUrl?: string | null;
+  skills?: string[] | null;
+  resumeUrl?: string | null;
+};
+
+const COMPLETION_CHECKS: CompletionCheck[] = [
+  { label: "Add a headline", isDone: (p) => !!p.headline },
+  { label: "Write a short bio", isDone: (p) => !!p.bio },
+  { label: "Add your phone number", isDone: (p) => !!p.phone },
+  { label: "Add your college", isDone: (p) => !!p.collegeName },
+  { label: "Add your degree", isDone: (p) => !!p.degree },
+  { label: "Add your branch", isDone: (p) => !!p.branch },
+  { label: "Add your graduation year", isDone: (p) => !!p.graduationYear },
+  { label: "Add your city", isDone: (p) => !!p.city },
+  {
+    label: "Link your LinkedIn or GitHub",
+    isDone: (p) => !!(p.linkedinUrl || p.githubUrl),
+  },
+  { label: "Add at least one skill", isDone: (p) => (p.skills?.length ?? 0) > 0 },
+  { label: "Add your resume link", isDone: (p) => !!p.resumeUrl },
+];
+
+function calcCompletion(p: CompletionFields): number {
+  const filled = COMPLETION_CHECKS.filter((c) => c.isDone(p)).length;
+  return Math.round((filled / COMPLETION_CHECKS.length) * 100);
+}
+
+function missingCompletionLabels(p: CompletionFields): string[] {
+  return COMPLETION_CHECKS.filter((c) => !c.isDone(p)).map((c) => c.label);
+}
+
+// =====================================================
+// COMPLETION STATUS (for the reminder popup)
+// =====================================================
+
+export type ProfileCompletionStatus = {
+  completion: number;
+  name: string;
+  /** Human-readable labels of what is still left to do. */
+  missing: string[];
+};
+
+/**
+ * Only what the reminder popup needs — no team/message counts, no full
+ * profile. Returns null for signed-out visitors and admins (an admin has no
+ * student profile to complete).
+ */
+export async function getProfileCompletionStatus(): Promise<ProfileCompletionStatus | null> {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    const userId = session?.user?.id;
+    if (!userId) return null;
+    if (session?.user?.role === "admin") return null;
+
+    const [existing] = await db
+      .select({
+        headline: profile.headline,
+        bio: profile.bio,
+        phone: profile.phone,
+        collegeName: profile.collegeName,
+        degree: profile.degree,
+        branch: profile.branch,
+        graduationYear: profile.graduationYear,
+        city: profile.city,
+        linkedinUrl: profile.linkedinUrl,
+        githubUrl: profile.githubUrl,
+        skills: profile.skills,
+        resumeUrl: profile.resumeUrl,
+      })
+      .from(profile)
+      .where(eq(profile.userId, userId))
+      .limit(1);
+
+    const fields = existing ?? {};
+    return {
+      completion: calcCompletion(fields),
+      name: session.user.name ?? "",
+      missing: missingCompletionLabels(fields),
+    };
+  } catch (error) {
+    // `headers()` signals "render dynamically" by throwing. Swallowing it
+    // would break static prerendering, so hand it back to Next.
+    unstable_rethrow(error);
+    console.error("getProfileCompletionStatus error:", error);
+    return null;
+  }
 }
 
 // =====================================================

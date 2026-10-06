@@ -1,21 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import Image from "next/image";
-import { Crown, ChevronDown, Loader2, Trophy, Users } from "lucide-react";
+import { ArrowRight, Crown, Trophy } from "lucide-react";
 
-import {
-  getTierList,
-  type TierGroup,
-  type TierLevel,
-  type TierTeam,
-} from "../actions";
+import { getUserTierList, type TierLevel, type TierUser } from "../actions";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Table,
   TableBody,
@@ -26,9 +22,8 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// =====================================================
-// TIER STYLES (bas color tokens — koi custom styling nahi)
-// =====================================================
+const PREVIEW_COUNT = 10;
+
 const TIER_COLOR: Record<TierLevel, string> = {
   Elite: "text-yellow-400",
   Platinum: "text-cyan-300",
@@ -37,22 +32,33 @@ const TIER_COLOR: Record<TierLevel, string> = {
   Bronze: "text-orange-400",
 };
 
+const TIER_BADGE_BG: Record<TierLevel, string> = {
+  Elite: "bg-yellow-400/10 border-yellow-400/30 text-yellow-300",
+  Platinum: "bg-cyan-400/10 border-cyan-400/30 text-cyan-200",
+  Gold: "bg-amber-400/10 border-amber-400/30 text-amber-300",
+  Silver: "bg-slate-400/10 border-slate-400/30 text-slate-200",
+  Bronze: "bg-orange-400/10 border-orange-400/30 text-orange-300",
+};
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 0) return "U";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 // =====================================================
 // MAIN
 // =====================================================
 export default function TierListSection() {
-  const [groups, setGroups] = useState<TierGroup[]>([]);
+  const [users, setUsers] = useState<TierUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<string>("");
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
-  const [showAllTabs, setShowAllTabs] = useState(false);
 
   useEffect(() => {
     let mounted = true;
-    getTierList().then((res) => {
+    getUserTierList().then((res) => {
       if (mounted) {
-        setGroups(res);
-        if (res.length > 0) setActiveTab(res[0].demandId);
+        setUsers(res);
         setLoading(false);
       }
     });
@@ -61,21 +67,10 @@ export default function TierListSection() {
     };
   }, []);
 
-  const activeGroup = useMemo(
-    () => groups.find((g) => g.demandId === activeTab) ?? null,
-    [groups, activeTab]
+  const preview = useMemo(
+    () => users.filter((u) => u.totalScore > 0).slice(0, PREVIEW_COUNT),
+    [users]
   );
-
-  useEffect(() => {
-    if (activeGroup && activeGroup.teams.length > 0) {
-      setSelectedTeamId(activeGroup.teams[0].id);
-    } else {
-      setSelectedTeamId(null);
-    }
-  }, [activeGroup]);
-
-  const visibleTabs = showAllTabs ? groups : groups.slice(0, 5);
-  const hasMoreTabs = groups.length > 5;
 
   // ---------- Loading ----------
   if (loading) {
@@ -83,22 +78,14 @@ export default function TierListSection() {
       <section className="w-full py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4 md:px-8 space-y-6">
           <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-10 w-full max-w-md" />
-          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-            <div className="space-y-3">
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-24 w-full" />
-            </div>
-            <Skeleton className="h-64 w-full" />
-          </div>
+          <Skeleton className="h-72 w-full" />
         </div>
       </section>
     );
   }
 
   // ---------- Empty ----------
-  if (groups.length === 0) {
+  if (preview.length === 0) {
     return (
       <section className="w-full py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4 md:px-8">
@@ -107,7 +94,8 @@ export default function TierListSection() {
               <Trophy className="w-8 h-8 text-muted-foreground mb-4" />
               <h3 className="text-sm font-semibold mb-1">No rankings yet</h3>
               <p className="text-xs text-muted-foreground max-w-[260px]">
-                Once teams start scoring, leaderboards will appear here.
+                Once students start scoring in teams and exams, leaderboards
+                will appear here.
               </p>
             </CardContent>
           </Card>
@@ -119,294 +107,185 @@ export default function TierListSection() {
   return (
     <section className="w-full py-16 md:py-24">
       <div className="max-w-7xl mx-auto px-4 md:px-8 space-y-8">
-
         {/* ---------- HEADER ---------- */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+          className="flex flex-wrap items-end justify-between gap-4"
         >
-          <Badge variant="outline" className="mb-4 gap-1.5">
-            <Crown className="w-3 h-3" />
-            LEADERBOARD
-          </Badge>
-          <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold tracking-tight">
-            Top teams by <span className="text-primary">skill tier</span>
-          </h2>
+          <div>
+            <Badge variant="outline" className="mb-4 gap-1.5">
+              <Crown className="w-3 h-3" />
+              LEADERBOARD
+            </Badge>
+            <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold tracking-tight">
+              Top students by <span className="text-primary">skill tier</span>
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Ranked by the total score earned across all their teams and exams.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            render={<Link href="/tierlist" />}
+            className="gap-1.5"
+          >
+            View full tier list
+            <ArrowRight className="w-4 h-4" />
+          </Button>
         </motion.div>
 
-        {/* ---------- TABS ---------- */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="flex flex-wrap items-center gap-2">
-            <TabsList className="flex-wrap h-auto">
-              {visibleTabs.map((g) => (
-                <TabsTrigger key={g.demandId} value={g.demandId}>
-                  {g.demandName}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+        {/* ---------- TABLE ---------- */}
+        <Card className="overflow-hidden">
+          <CardHeader className="flex-row items-center justify-between space-y-0 border-b">
+            <CardTitle className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+              Leaderboard
+            </CardTitle>
+            <span className="text-xs text-muted-foreground">
+              Top {preview.length} of {users.length}
+            </span>
+          </CardHeader>
 
-            {hasMoreTabs && !showAllTabs && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowAllTabs(true)}
-              >
-                View More
-                <ChevronDown className="w-3.5 h-3.5" />
-              </Button>
-            )}
-          </div>
-        </Tabs>
-
-        {/* ---------- SPLIT LAYOUT ---------- */}
-        {activeGroup && (
-          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-
-            {/* LEFT — Team cards */}
-            <div className="flex lg:flex-col gap-3 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 -mx-4 px-4 lg:mx-0 lg:px-0">
-              {activeGroup.teams.length === 0 ? (
-                <Card className="w-full">
-                  <CardContent className="py-10 text-center">
-                    <p className="text-xs text-muted-foreground">
-                      No teams in this category yet
-                    </p>
-                  </CardContent>
-                </Card>
-              ) : (
-                activeGroup.teams.map((team, i) => (
-                  <TeamCard
-                    key={team.id}
-                    team={team}
-                    index={i}
-                    active={team.id === selectedTeamId}
-                    onClick={() => setSelectedTeamId(team.id)}
-                  />
-                ))
-              )}
+          <CardContent className="p-0">
+            {/* Desktop table */}
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[70px]">Rank</TableHead>
+                    <TableHead>Student</TableHead>
+                    <TableHead className="w-[90px]">Teams</TableHead>
+                    <TableHead className="w-[90px]">Exams</TableHead>
+                    <TableHead className="w-[110px]">Score</TableHead>
+                    <TableHead className="w-[130px]">Tier</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {preview.map((u) => (
+                    <TableRow key={u.id}>
+                      <TableCell
+                        className={`font-bold ${
+                          u.rank === 1
+                            ? "text-yellow-400"
+                            : u.rank === 2
+                            ? "text-cyan-300"
+                            : u.rank === 3
+                            ? "text-amber-400"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        #{u.rank}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="relative shrink-0">
+                            <Avatar className="w-8 h-8">
+                              <AvatarImage src={u.image ?? undefined} />
+                              <AvatarFallback>
+                                {initials(u.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <Image
+                              src={`/tiers/${u.tier.toLowerCase()}.png`}
+                              alt={u.tier}
+                              width={13}
+                              height={13}
+                              className="absolute -bottom-1 -right-1 object-contain"
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate">
+                              {u.name}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {u.headline || u.email}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {u.teamCount}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {u.examCount}
+                      </TableCell>
+                      <TableCell
+                        className={`text-sm font-bold ${TIER_COLOR[u.tier]}`}
+                      >
+                        {u.totalScore}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={`gap-1.5 ${TIER_BADGE_BG[u.tier]}`}
+                        >
+                          <Image
+                            src={`/tiers/${u.tier.toLowerCase()}.png`}
+                            alt={u.tier}
+                            width={12}
+                            height={12}
+                          />
+                          {u.tier}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
 
-            {/* RIGHT — Detail table */}
-            <Card className="overflow-hidden">
-              <CardHeader className="flex-row items-center justify-between space-y-0 border-b">
-                <CardTitle className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                  {activeGroup.demandName}
-                </CardTitle>
-                <span className="text-xs text-muted-foreground">
-                  {activeGroup.teams.length} teams
-                </span>
-              </CardHeader>
-
-              <CardContent className="p-0">
-                {/* Desktop table */}
-                <div className="hidden md:block">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Rank</TableHead>
-                        <TableHead>Team</TableHead>
-                        <TableHead>Members</TableHead>
-                        <TableHead>Score</TableHead>
-                        <TableHead>Tier</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {activeGroup.teams.map((t, i) => (
-                        <TeamRow
-                          key={t.id}
-                          team={t}
-                          index={i}
-                          active={t.id === selectedTeamId}
-                          onClick={() => setSelectedTeamId(t.id)}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
+            {/* Mobile list */}
+            <div className="md:hidden divide-y">
+              {preview.map((u) => (
+                <div key={u.id} className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`text-xs font-bold w-7 shrink-0 ${
+                        u.rank === 1
+                          ? "text-yellow-400"
+                          : u.rank <= 3
+                          ? "text-cyan-300"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      #{u.rank}
+                    </span>
+                    <div className="relative shrink-0">
+                      <Avatar className="w-8 h-8">
+                        <AvatarImage src={u.image ?? undefined} />
+                        <AvatarFallback>{initials(u.name)}</AvatarFallback>
+                      </Avatar>
+                      <Image
+                        src={`/tiers/${u.tier.toLowerCase()}.png`}
+                        alt={u.tier}
+                        width={12}
+                        height={12}
+                        className="absolute -bottom-1 -right-1 object-contain"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold truncate">{u.name}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {u.teamCount} teams · {u.examCount} exams
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-sm font-bold ${TIER_COLOR[u.tier]}`}>
+                        {u.totalScore}
+                      </p>
+                      <p className={`text-[9px] ${TIER_COLOR[u.tier]}`}>
+                        {u.tier}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-
-                {/* Mobile list */}
-                <div className="md:hidden divide-y">
-                  {activeGroup.teams.map((t, i) => (
-                    <MobileRow
-                      key={t.id}
-                      team={t}
-                      index={i}
-                      active={t.id === selectedTeamId}
-                      onClick={() => setSelectedTeamId(t.id)}
-                    />
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </section>
-  );
-}
-
-// =====================================================
-// TEAM CARD
-// =====================================================
-function TeamCard({
-  team,
-  index,
-  active,
-  onClick,
-}: {
-  team: TierTeam;
-  index: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const color = TIER_COLOR[team.tier];
-  return (
-    <motion.button
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.4, delay: index * 0.06 }}
-      onClick={onClick}
-      className={`shrink-0 w-[240px] lg:w-full text-left rounded-xl border transition-colors
-        ${active ? "border-primary bg-accent" : "border-border hover:bg-accent/50"}`}
-    >
-      <Card className="border-0 shadow-none bg-transparent">
-        <CardContent className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-lg border bg-muted flex items-center justify-center shrink-0 overflow-hidden">
-              <Image
-                src={`/tiers/${team.tier.toLowerCase()}.png`}
-                alt={team.tier}
-                width={36}
-                height={36}
-                className="object-contain"
-              />
-            </div>
-
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className={`text-[10px] font-bold ${color}`}>
-                  #{team.rank}
-                </span>
-                <Badge variant="outline" className={`text-[10px] ${color}`}>
-                  {team.tier}
-                </Badge>
-              </div>
-              <h4 className="text-sm font-semibold truncate">{team.name}</h4>
-              <p className="text-[10px] text-muted-foreground truncate">
-                {team.internshipName}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center justify-between text-[10px]">
-            <span className="text-muted-foreground">Score</span>
-            <span className={`font-bold ${color}`}>{team.score}</span>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.button>
-  );
-}
-
-// =====================================================
-// TEAM ROW (desktop)
-// =====================================================
-function TeamRow({
-  team,
-  index,
-  active,
-  onClick,
-}: {
-  team: TierTeam;
-  index: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const color = TIER_COLOR[team.tier];
-  return (
-    <TableRow
-      onClick={onClick}
-      data-state={active ? "selected" : undefined}
-      className="cursor-pointer"
-    >
-      <TableCell className="font-bold">#{team.rank}</TableCell>
-      <TableCell>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg border bg-muted flex items-center justify-center overflow-hidden shrink-0">
-            <Image
-              src={`/tiers/${team.tier.toLowerCase()}.png`}
-              alt={team.tier}
-              width={24}
-              height={24}
-              className="object-contain"
-            />
-          </div>
-          <span className="text-sm font-semibold truncate max-w-[180px]">
-            {team.name}
-          </span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <span className="text-xs text-muted-foreground flex items-center gap-1">
-          <Users className="w-3 h-3" />
-          {team.memberCount}
-        </span>
-      </TableCell>
-      <TableCell className={`font-bold ${color}`}>{team.score}</TableCell>
-      <TableCell>
-        <Badge variant="outline" className={color}>
-          {team.tier}
-        </Badge>
-      </TableCell>
-    </TableRow>
-  );
-}
-
-// =====================================================
-// MOBILE ROW
-// =====================================================
-function MobileRow({
-  team,
-  index,
-  active,
-  onClick,
-}: {
-  team: TierTeam;
-  index: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const color = TIER_COLOR[team.tier];
-  return (
-    <button
-      onClick={onClick}
-      data-state={active ? "selected" : undefined}
-      className="w-full text-left px-4 py-3 transition-colors hover:bg-accent data-[state=selected]:bg-accent"
-    >
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-bold w-6 shrink-0">#{team.rank}</span>
-        <div className="w-8 h-8 rounded-lg border bg-muted flex items-center justify-center overflow-hidden shrink-0">
-          <Image
-            src={`/tiers/${team.tier.toLowerCase()}.png`}
-            alt={team.tier}
-            width={22}
-            height={22}
-            className="object-contain"
-          />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold truncate">{team.name}</p>
-          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-            <Users className="w-2.5 h-2.5" />
-            {team.memberCount} · {team.internshipName}
-          </p>
-        </div>
-        <div className="text-right shrink-0">
-          <p className={`text-sm font-bold ${color}`}>{team.score}</p>
-          <p className={`text-[9px] ${color}`}>{team.tier}</p>
-        </div>
-      </div>
-    </button>
   );
 }

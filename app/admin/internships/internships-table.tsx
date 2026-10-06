@@ -79,6 +79,7 @@ export function InternshipsTable({
               <TableHead>Name</TableHead>
               <TableHead>Total Registrations</TableHead>
               <TableHead>Demand Name</TableHead>
+              <TableHead>Registrations Close</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Created At</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -87,7 +88,7 @@ export function InternshipsTable({
           <TableBody>
             {data.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center">
+                <TableCell colSpan={8} className="h-24 text-center">
                   No internships found.
                 </TableCell>
               </TableRow>
@@ -112,6 +113,12 @@ export function InternshipsTable({
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {row.demandName ?? '—'}
+                  </TableCell>
+                  <TableCell>
+                    <DeadlineCell
+                      date={row.lastSubmissionDate}
+                      daysLeft={row.daysLeft}
+                    />
                   </TableCell>
                   <TableCell>
                     <Badge variant={row.isPublic ? 'default' : 'outline'}>
@@ -221,6 +228,64 @@ function getPageNumbers(current: number, total: number): (number | '…')[] {
   if (end < total - 1) pages.push('…')
   pages.push(total)
   return pages
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Registration deadline                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Shows the cutoff for NEW registrations at a glance.
+ *
+ * `internships.last_submission_date` is the deadline students see before
+ * applying. It deliberately does NOT lock out people who already applied —
+ * see createRegistrationAndOrder.
+ *
+ * `daysLeft` arrives from the server so no clock is read during render.
+ */
+function DeadlineCell({
+  date,
+  daysLeft,
+}: {
+  date: Date | null
+  daysLeft: number | null
+}) {
+  if (!date || daysLeft === null) {
+    return (
+      <div className="flex flex-col">
+        <span className="text-xs text-muted-foreground">No deadline</span>
+        <span className="text-[10px] text-muted-foreground/70">
+          Open for registrations
+        </span>
+      </div>
+    )
+  }
+
+  const closed = daysLeft < 0
+
+  return (
+    <div className="flex flex-col">
+      <span className="text-xs">{format(new Date(date), 'MMM d, yyyy')}</span>
+      <Badge
+        variant="outline"
+        className={
+          closed
+            ? 'mt-0.5 w-fit border-red-400/40 bg-red-400/10 text-[9px] text-red-500'
+            : daysLeft <= 3
+              ? 'mt-0.5 w-fit border-amber-400/40 bg-amber-400/10 text-[9px] text-amber-500'
+              : 'mt-0.5 w-fit border-emerald-400/40 bg-emerald-400/10 text-[9px] text-emerald-500'
+        }
+      >
+        {closed
+          ? 'Closed'
+          : daysLeft === 0
+            ? 'Closes today'
+            : daysLeft === 1
+              ? '1 day left'
+              : `${daysLeft} days left`}
+      </Badge>
+    </div>
+  )
 }
 
 /* -------------------------------------------------------------------------- */

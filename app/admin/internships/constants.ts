@@ -30,6 +30,13 @@ export type InternshipRow = {
   demandId: string
   demandName: string | null
   isPublic: boolean
+  /** Cutoff for NEW registrations. Null = open forever. */
+  lastSubmissionDate: Date | null
+  /**
+   * Days until the cutoff, computed on the server. Negative once it has
+   * passed, null when there is no cutoff.
+   */
+  daysLeft: number | null
   createdAt: Date
 }
 

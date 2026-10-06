@@ -55,6 +55,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ExamDrawerForm } from './exam-drawer-form'
 import { ExamQuestionsDrawer } from './exam-questions-drawer'
+import { CheckAllEmailsButton, ExamEmailsDrawer } from './exam-emails-drawer'
 import { deleteExam, toggleExamVisibility } from './actions'
 import type { ExamRow, InternshipOption } from './constants'
 
@@ -69,6 +70,8 @@ export function ExamsTable({
   totalPages,
   total,
   pageSize,
+  emailCounts = {},
+  pendingEmailChecks = 0,
 }: {
   data: ExamRow[]
   internshipOptions: InternshipOption[]
@@ -76,6 +79,8 @@ export function ExamsTable({
   totalPages: number
   total: number
   pageSize: number
+  emailCounts?: Record<string, { total: number; delivered: number; failed: number }>
+  pendingEmailChecks?: number
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -94,39 +99,43 @@ export function ExamsTable({
   return (
     <div className="flex flex-col gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm">
           {total} {total === 1 ? 'exam' : 'exams'} total
         </p>
 
-        <Drawer open={createOpen} onOpenChange={setCreateOpen}>
-          <DrawerTrigger
-            render={
-              <Button>
-                <Plus />
-                Create Exam
-              </Button>
-            }
-          />
-          <DrawerContent className="max-h-[90vh]">
-            <DrawerHeader className="text-left">
-              <DrawerTitle>Create New Exam</DrawerTitle>
-              <DrawerDescription>
-                Set up an exam for an internship. Add questions after saving.
-              </DrawerDescription>
-            </DrawerHeader>
-            <div className="overflow-y-auto px-4 pb-6">
-              <ExamDrawerForm
-                mode="create"
-                internshipOptions={internshipOptions}
-                onSuccess={() => {
-                  setCreateOpen(false)
-                  router.refresh()
-                }}
-              />
-            </div>
-          </DrawerContent>
-        </Drawer>
+        <div className="flex items-center gap-2">
+          <CheckAllEmailsButton pending={pendingEmailChecks} />
+
+          <Drawer open={createOpen} onOpenChange={setCreateOpen}>
+            <DrawerTrigger
+              render={
+                <Button>
+                  <Plus />
+                  Create Exam
+                </Button>
+              }
+            />
+            <DrawerContent className="max-h-[90vh]">
+              <DrawerHeader className="text-left">
+                <DrawerTitle>Create New Exam</DrawerTitle>
+                <DrawerDescription>
+                  Set up an exam for an internship. Add questions after saving.
+                </DrawerDescription>
+              </DrawerHeader>
+              <div className="overflow-y-auto px-4 pb-6">
+                <ExamDrawerForm
+                  mode="create"
+                  internshipOptions={internshipOptions}
+                  onSuccess={() => {
+                    setCreateOpen(false)
+                    router.refresh()
+                  }}
+                />
+              </div>
+            </DrawerContent>
+          </Drawer>
+        </div>
       </div>
 
       {/* Table */}
@@ -140,6 +149,7 @@ export function ExamsTable({
               <TableHead>Duration</TableHead>
               <TableHead>Marks</TableHead>
               <TableHead>Questions</TableHead>
+              <TableHead>Emails</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -149,7 +159,7 @@ export function ExamsTable({
             {data.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={10}
                   className="text-muted-foreground h-24 text-center"
                 >
                   No exams found. Click <strong>Create Exam</strong> to add one.
@@ -195,6 +205,13 @@ export function ExamsTable({
                       examId={row.id}
                       examName={row.name}
                       questionCount={row.questionCount}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <ExamEmailsDrawer
+                      examId={row.id}
+                      examName={row.name}
+                      initialCounts={emailCounts[row.id]}
                     />
                   </TableCell>
                   <TableCell>

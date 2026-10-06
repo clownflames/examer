@@ -267,7 +267,11 @@ export default function ApplyDrawer({
   useEffect(() => {
     if (!open) return;
     // Nothing to resolve synchronously — `phase` derives these from props.
-    if (!internshipId || !isLoggedIn || closed) return;
+    //
+    // `closed` is deliberately NOT an early return here. The deadline only
+    // stops NEW registrations; somebody who already paid must still reach
+    // their exams after it passes.
+    if (!internshipId || !isLoggedIn) return;
 
     let cancelled = false;
 
@@ -303,16 +307,30 @@ export default function ApplyDrawer({
   }, [open, internshipId, isLoggedIn, closed]);
 
   /**
+   * Someone who already has an application for this internship — either paid,
+   * or applied before the deadline and still owes money. The cutoff is meant
+   * to stop NEW applications, never to strand these two.
+   */
+  const alreadyRegistered = regStatus?.hasRegistration === true;
+
+  /**
    * The visible step. "loading" and the gated states are derived rather than
    * stored, so no effect ever has to reset them.
+   *
+   * The deadline only blocks people with no application yet.
    */
-  const phase: DrawerState = closed
-    ? "closed"
-    : !isLoggedIn
-      ? "form"
-      : resolvedFor === internshipId
-        ? state
-        : "loading";
+  const phase: DrawerState = !isLoggedIn
+    ? closed
+      ? "closed"
+      : "form"
+    : resolvedFor === internshipId
+      ? // Resolved — only now can we tell whether this person is blocked.
+        closed && !alreadyRegistered
+        ? "closed"
+        : state
+      : // Still resolving, so never flash "closed" at somebody who may
+        // already have paid.
+        "loading";
 
   const plainTextLength = stripHtml(coverLetter).length;
 

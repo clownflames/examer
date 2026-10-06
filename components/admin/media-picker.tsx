@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import Image from 'next/image'
-import { ImagePlus, Loader2, Search, X } from 'lucide-react'
+import { ImagePlus, Loader2, Search, Upload, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 
 import { getMediaAssets } from '@/app/admin/media/actions'
+import { MediaUploadDialog } from '@/app/admin/media/media-upload-dialog'
 import type { MediaAssetRow } from '@/app/admin/media/constants'
 
 export function MediaPicker({
@@ -28,6 +29,7 @@ export function MediaPicker({
   label?: string
 }) {
   const [open, setOpen] = React.useState(false)
+  const [uploadOpen, setUploadOpen] = React.useState(false)
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -75,23 +77,48 @@ export function MediaPicker({
           </div>
         </div>
       ) : (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setOpen(true)}
-          className="h-20 w-full gap-2 border-dashed"
-        >
-          <ImagePlus className="h-4 w-4" />
-          Choose image
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setOpen(true)}
+            className="h-20 flex-1 gap-2 border-dashed"
+          >
+            <ImagePlus className="h-4 w-4" />
+            Choose image
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setUploadOpen(true)}
+            className="h-20 w-24 gap-2 border-dashed"
+            title="Upload a new image"
+          >
+            <Upload className="h-4 w-4" />
+            Upload
+          </Button>
+        </div>
       )}
 
       <MediaPickerDialog
         open={open}
         onOpenChange={setOpen}
+        onUploadNew={() => {
+          setOpen(false)
+          setUploadOpen(true)
+        }}
         onSelect={(url) => {
           onChange(url)
           setOpen(false)
+        }}
+      />
+
+      {/* Freshly uploaded image is used straight away. */}
+      <MediaUploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onUploadedUrls={(urls) => {
+          if (urls.length > 0) onChange(urls[urls.length - 1])
         }}
       />
     </div>
@@ -106,10 +133,12 @@ function MediaPickerDialog({
   open,
   onOpenChange,
   onSelect,
+  onUploadNew,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   onSelect: (url: string) => void
+  onUploadNew: () => void
 }) {
   const [assets, setAssets] = React.useState<MediaAssetRow[]>([])
   const [loading, setLoading] = React.useState(false)
@@ -142,18 +171,29 @@ function MediaPickerDialog({
         <DialogHeader>
           <DialogTitle>Pick an image</DialogTitle>
           <DialogDescription>
-            Choose from your media library.
+            Choose from your media library, or upload a new one.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="relative">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search images…"
-            className="pl-9"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search images…"
+              className="pl-9"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onUploadNew}
+            className="gap-1.5"
+          >
+            <Upload className="h-4 w-4" />
+            Upload new
+          </Button>
         </div>
 
         <div className="max-h-[55vh] min-h-[200px] overflow-y-auto">
@@ -163,7 +203,7 @@ function MediaPickerDialog({
             </div>
           ) : assets.length === 0 ? (
             <div className="text-muted-foreground py-16 text-center text-sm">
-              No images found. Upload some in{' '}
+              No images found. Upload one with the button above, or add some in{' '}
               <a
                 href="/admin/media"
                 target="_blank"

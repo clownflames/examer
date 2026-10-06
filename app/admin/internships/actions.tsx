@@ -46,6 +46,7 @@ export async function getInternships(page = 1): Promise<{
       demandId: internships.demandId,
       demandName: employeeDemand.name,
       isPublic: internships.isPublic,
+      lastSubmissionDate: internships.lastSubmissionDate,
       createdAt: internships.createdAt,
       totalRegistrations: registrationsCount.as('total_registrations'),
     })
@@ -62,6 +63,10 @@ export async function getInternships(page = 1): Promise<{
   const total = Number(totalResult[0]?.value ?? 0)
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
+  // Computed here, not in the table: doing it during render would read the
+  // clock on the client and can disagree with the server-rendered HTML.
+  const now = Date.now()
+
   return {
     data: rows.map((r) => ({
       id: r.id,
@@ -69,6 +74,10 @@ export async function getInternships(page = 1): Promise<{
       demandId: r.demandId,
       demandName: r.demandName,
       isPublic: r.isPublic,
+      lastSubmissionDate: r.lastSubmissionDate,
+      daysLeft: r.lastSubmissionDate
+        ? Math.ceil((+new Date(r.lastSubmissionDate) - now) / 86_400_000)
+        : null,
       createdAt: r.createdAt,
       totalRegistrations: Number(r.totalRegistrations ?? 0),
     })),

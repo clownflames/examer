@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import RichTextEditor from '@/components/rich-text-editor'
+import { MediaPicker } from '@/components/admin/media-picker'
 import { createDemand, updateDemand } from './actions'
 import { type DemandInput } from './constants'
 
@@ -132,22 +133,43 @@ export function DemandDrawerForm({
           )}
         />
 
-        {/* Icon URL */}
+        {/* Icon — pick from the media library or upload a new one */}
         <Controller
           name="iconUrl"
           control={form.control}
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid}>
-              <FieldLabel htmlFor="demand-iconUrl">Icon URL</FieldLabel>
+              <FieldLabel>Icon</FieldLabel>
+              <MediaPicker
+                value={field.value || null}
+                onChange={(url) => field.onChange(url)}
+                label="Icon image"
+              />
+              <FieldDescription>
+                Optional. A small square image that represents this demand.
+                Pick an existing one from your media library or upload a new
+                image.
+              </FieldDescription>
+              {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+            </Field>
+          )}
+        />
+
+        {/* Icon URL — manual fallback */}
+        <Controller
+          name="iconUrl"
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={fieldState.invalid}>
+              <FieldLabel htmlFor="demand-iconUrl">
+                Or paste an image URL
+              </FieldLabel>
               <Input
                 {...field}
                 id="demand-iconUrl"
                 placeholder="https://…"
                 value={field.value ?? ''}
               />
-              <FieldDescription>
-                Optional. A small square image that represents this demand.
-              </FieldDescription>
               {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
             </Field>
           )}

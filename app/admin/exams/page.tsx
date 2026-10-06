@@ -1,4 +1,9 @@
-import { getExams, getInternshipOptions } from './actions'
+import {
+  getAllEmailNotificationCounts,
+  getExams,
+  getInternshipOptions,
+  getPendingDeliveryCheckCount,
+} from './actions'
 import { ExamsTable } from './exams-table'
 
 export default async function ExamsPage({
@@ -9,9 +14,16 @@ export default async function ExamsPage({
   const params = await searchParams
   const page = Math.max(1, Number(params.page) || 1)
 
-  const [{ data, totalPages, total }, internshipOptions] = await Promise.all([
+  const [
+    { data, totalPages, total },
+    internshipOptions,
+    emailCounts,
+    pendingEmailChecks,
+  ] = await Promise.all([
     getExams(page),
     getInternshipOptions(),
+    getAllEmailNotificationCounts(),
+    getPendingDeliveryCheckCount(),
   ])
 
   return (
@@ -19,7 +31,9 @@ export default async function ExamsPage({
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">Exams</h2>
         <p className="text-muted-foreground text-sm">
-          Create and manage exams for internships.
+          Create and manage exams for internships. New exams can be announced
+          by email to every student who has paid for the internship — the{' '}
+          <strong>Emails</strong> column shows who got it.
         </p>
       </div>
 
@@ -30,6 +44,8 @@ export default async function ExamsPage({
         totalPages={totalPages}
         total={total}
         pageSize={15}
+        emailCounts={emailCounts}
+        pendingEmailChecks={pendingEmailChecks}
       />
     </div>
   )

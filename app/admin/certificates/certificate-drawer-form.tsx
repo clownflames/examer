@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { MediaPicker } from '@/app/admin/documents/_components/media-picker'
+import { MediaPicker } from '@/components/admin/media-picker'
 
 import { createCertificate, updateCertificate } from './actions'
 import {

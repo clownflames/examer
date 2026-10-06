@@ -16,6 +16,7 @@ import {
   FieldLabel,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -83,6 +84,7 @@ export function ExamDrawerForm({
 }) {
   const [submitting, setSubmitting] = React.useState(false)
   const [loading, setLoading] = React.useState(mode === 'edit')
+  const [notifyStudents, setNotifyStudents] = React.useState(true)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(clientSchema) as Resolver<FormValues>,
@@ -177,15 +179,41 @@ export function ExamDrawerForm({
           : Number(values.passingMarks),
     }
 
-    const result =
-      mode === 'create'
-        ? await createExam(payload)
-        : await updateExam(examId!, payload)
+    if (mode === 'create') {
+      const result = await createExam({ ...payload, notifyStudents })
+      setSubmitting(false)
 
+      if (!result.success) {
+        toast.error(result.error ?? 'Something went wrong.')
+        return
+      }
+
+      const n = result.notified
+      if (notifyStudents && n) {
+        if (n.sent > 0) {
+          toast.success(
+            `Exam created. ${n.sent} of ${n.recipients} students emailed.`,
+            { description: n.message }
+          )
+        } else {
+          toast.warning('Exam created, but no emails were sent.', {
+            description: n.message,
+          })
+        }
+      } else {
+        toast.success('Exam created.')
+      }
+
+      form.reset()
+      onSuccess()
+      return
+    }
+
+    const result = await updateExam(examId!, payload)
     setSubmitting(false)
 
     if (result.success) {
-      toast.success(mode === 'create' ? 'Exam created.' : 'Exam updated.')
+      toast.success('Exam updated.')
       form.reset()
       onSuccess()
     } else {
@@ -408,12 +436,37 @@ export function ExamDrawerForm({
           />
         </div>
 
+        {/* Notify students (create mode only) */}
+        {mode === 'create' && (
+          <Field>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+              <Switch
+                checked={notifyStudents}
+                onCheckedChange={setNotifyStudents}
+                className="mt-0.5"
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium">
+                  Email students that this exam is ready
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  Sends a notification to every student with a paid
+                  registration for this internship. You can also send it later
+                  from the Exams table.
+                </span>
+              </span>
+            </label>
+          </Field>
+        )}
+
         {/* Info banner */}
         <div className="bg-muted/40 text-muted-foreground flex items-start gap-3 rounded-lg border p-3 text-sm">
           <ListChecks className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
             After saving, open the exam from the table to add questions, set
             question types (MCQ, text, code, voice), and configure marks.
+            {mode === 'create' &&
+              ' If you ticked the box above, students are emailed as soon as the exam is saved — add your questions first if you would rather they received it later.'}
           </p>
         </div>
       </FieldGroup>

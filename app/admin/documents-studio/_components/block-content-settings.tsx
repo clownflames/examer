@@ -8,7 +8,7 @@ import {
   num,
   str,
 } from '../_lib/style'
-import { MediaPicker } from '@/app/admin/documents/_components/media-picker'
+import { MediaPicker } from '@/components/admin/media-picker'
 import { HEADING_LEVEL_SIZE } from './blocks/heading-block'
 import {
   AlignField,

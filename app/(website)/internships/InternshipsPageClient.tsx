@@ -301,7 +301,10 @@ export default function InternshipsPageClient() {
       {/* ============ TOOLBAR ============ */}
       <section className="max-w-7xl mx-auto px-4 md:px-8 pt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
+          {/* A <p> cannot hold <Skeleton>, which renders a <div>. The
+              browser would close the <p> early and hydration would mismatch,
+              so this is a <div> with the same classes. */}
+          <div className="text-sm text-muted-foreground">
             {loading ? (
               <Skeleton className="h-4 w-32" />
             ) : (
@@ -312,7 +315,7 @@ export default function InternshipsPageClient() {
                 internships found
               </>
             )}
-          </p>
+          </div>
 
           <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
             <SelectTrigger className="w-[160px] h-9">

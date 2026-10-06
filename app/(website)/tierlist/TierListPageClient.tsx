@@ -3,28 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
-import {
-  Crown,
-  Search,
-  Trophy,
-  Users,
-  Loader2,
-  Sparkles,
-  TrendingUp,
-} from "lucide-react";
+import { Crown, Search, Trophy, Users } from "lucide-react";
 
-import {
-  getDemandsWithCounts,
-  getTierListTeams,
-  type DemandSummary,
-  type TierLevel,
-  type TierListTeam,
-} from "../actions";
+import { getUserTierList, type TierLevel, type TierUser } from "../actions";
 
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -40,8 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import TeamDetailDrawer from "./TeamDetailDrawer";
+import UserDetailDrawer from "./UserDetailDrawer";
 
 // =====================================================
 // CONSTANTS
@@ -64,45 +50,49 @@ const TIER_BADGE_BG: Record<TierLevel, string> = {
   Bronze: "bg-orange-400/10 border-orange-400/30 text-orange-300",
 };
 
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 0) return "U";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 // =====================================================
 // MAIN
 // =====================================================
 export default function TierListPageClient() {
-  const [demands, setDemands] = useState<DemandSummary[]>([]);
-  const [teams, setTeams] = useState<TierListTeam[]>([]);
-  const [loadingDemands, setLoadingDemands] = useState(true);
-  const [loadingTeams, setLoadingTeams] = useState(true);
-  const [activeDemand, setActiveDemand] = useState<string | null>(null);
+  const [users, setUsers] = useState<TierUser[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState<"all" | TierLevel>("all");
-  const [openTeamId, setOpenTeamId] = useState<string | null>(null);
+  const [openUserId, setOpenUserId] = useState<string | null>(null);
 
-  // fetch demands once
   useEffect(() => {
-    getDemandsWithCounts().then((res) => {
-      setDemands(res);
-      setLoadingDemands(false);
+    let mounted = true;
+    getUserTierList().then((res) => {
+      if (mounted) {
+        setUsers(res);
+        setLoading(false);
+      }
     });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // fetch teams when demand changes
-  useEffect(() => {
-    setLoadingTeams(true);
-    getTierListTeams(activeDemand).then((res) => {
-      setTeams(res);
-      setLoadingTeams(false);
-    });
-  }, [activeDemand]);
-
   // filtering
-  const filteredTeams = useMemo(() => {
-    return teams.filter((t) => {
-      if (tierFilter !== "all" && t.tier !== tierFilter) return false;
-      if (search.trim() && !t.name.toLowerCase().includes(search.toLowerCase()))
-        return false;
-      return true;
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return users.filter((u) => {
+      if (tierFilter !== "all" && u.tier !== tierFilter) return false;
+      if (!q) return true;
+      return (
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.headline ?? "").toLowerCase().includes(q)
+      );
     });
-  }, [teams, search, tierFilter]);
+  }, [users, search, tierFilter]);
 
   // tier breakdown
   const tierBreakdown = useMemo(() => {
@@ -113,15 +103,12 @@ export default function TierListPageClient() {
       Silver: 0,
       Bronze: 0,
     };
-    teams.forEach((t) => (map[t.tier] += 1));
+    users.forEach((u) => (map[u.tier] += 1));
     return map;
-  }, [teams]);
+  }, [users]);
 
   // top 3 for podium
-  const podium = useMemo(
-    () => teams.slice(0, 3),
-    [teams]
-  );
+  const podium = useMemo(() => users.slice(0, 3), [users]);
 
   return (
     <div className="min-h-screen pb-24">
@@ -141,16 +128,17 @@ export default function TierListPageClient() {
               LEADERBOARD
             </Badge>
             <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight">
-              Skill <span className="text-primary">Tier List</span>
+              Student <span className="text-primary">Tier List</span>
             </h1>
             <p className="mt-3 text-sm md:text-base text-muted-foreground max-w-lg">
-              Top performing teams across every skill demand — ranked by score,
-              sorted into tiers.
+              Every student ranked by the total score they have earned so far
+              across all their teams and exams — sorted into tiers by their
+              overall percentage.
             </p>
           </motion.div>
 
           {/* Tier breakdown strip */}
-          {teams.length > 0 && (
+          {users.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -179,293 +167,239 @@ export default function TierListPageClient() {
       </section>
 
       {/* ============ BODY ============ */}
-      <section className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6 lg:gap-8">
+      <section className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-8 space-y-6">
+        {/* Podium — top 3 */}
+        {!loading && podium.length > 0 && (
+          <Podium users={podium} onOpen={setOpenUserId} />
+        )}
 
-          {/* ===== SIDEBAR: Demands ===== */}
-          <aside className="lg:sticky lg:top-24 lg:self-start">
-            <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 -mx-4 px-4 lg:mx-0 lg:px-0">
-              <button
-                onClick={() => setActiveDemand(null)}
-                className={`shrink-0 text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                  ${
-                    activeDemand === null
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-accent text-muted-foreground"
-                  }`}
-              >
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4" />
-                  All Demands
-                </div>
-              </button>
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search students..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Select
+            value={tierFilter}
+            onValueChange={(v) => setTierFilter(v as "all" | TierLevel)}
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Tier" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Tiers</SelectItem>
+              {TIER_ORDER.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-              {loadingDemands
-                ? Array.from({ length: 5 }).map((_, i) => (
-                    <Skeleton key={i} className="h-10 w-full shrink-0" />
-                  ))
-                : demands.map((d) => {
-                    const active = d.id === activeDemand;
-                    return (
-                      <button
-                        key={d.id}
-                        onClick={() => setActiveDemand(d.id)}
-                        className={`shrink-0 text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                          ${
-                            active
-                              ? "bg-primary text-primary-foreground"
-                              : "hover:bg-accent text-muted-foreground"
-                          }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {d.iconUrl ? (
-                            <Image
-                              src={d.iconUrl}
-                              alt={d.name}
-                              width={16}
-                              height={16}
-                              className="rounded shrink-0"
-                            />
-                          ) : (
-                            <Trophy className="w-4 h-4 shrink-0" />
-                          )}
-                          <span className="truncate">{d.name}</span>
-                          <span
-                            className={`text-[10px] ml-auto px-1.5 py-0.5 rounded ${
-                              active ? "bg-black/20" : "bg-muted"
-                            }`}
-                          >
-                            {d.teamCount}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+        {/* Students table */}
+        <Card className="overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b">
+            <h2 className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
+              All Students
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              {filteredUsers.length} students
+            </span>
+          </div>
+
+          {/* Loading */}
+          {loading ? (
+            <div className="p-5 space-y-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
             </div>
-          </aside>
-
-          {/* ===== MAIN ===== */}
-          <main className="min-w-0 space-y-6">
-
-            {/* Podium — top 3 */}
-            {!loadingTeams && podium.length > 0 && (
-              <Podium teams={podium} onOpen={setOpenTeamId} />
-            )}
-
-            {/* Filters */}
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative flex-1 min-w-[180px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search teams..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <Select
-                value={tierFilter}
-                onValueChange={(v) => setTierFilter(v as "all" | TierLevel)}
-              >
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="Tier" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Tiers</SelectItem>
-                  {TIER_ORDER.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Teams table */}
-            <Card className="overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-3 border-b">
-                <h2 className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                  {activeDemand
-                    ? demands.find((d) => d.id === activeDemand)?.name
-                    : "All Teams"}
-                </h2>
-                <span className="text-xs text-muted-foreground">
-                  {filteredTeams.length} teams
-                </span>
-              </div>
-
-              {/* Loading */}
-              {loadingTeams ? (
-                <div className="p-5 space-y-3">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
-                  ))}
-                </div>
-              ) : filteredTeams.length === 0 ? (
-                <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                  <Trophy className="w-8 h-8 text-muted-foreground mb-4" />
-                  <h3 className="text-sm font-semibold mb-1">No teams found</h3>
-                  <p className="text-xs text-muted-foreground max-w-[260px]">
-                    {search || tierFilter !== "all"
-                      ? "Try clearing filters or search"
-                      : "No teams in this category yet"}
-                  </p>
-                </CardContent>
-              ) : (
-                <>
-                  {/* Desktop table */}
-                  <div className="hidden md:block">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[70px]">Rank</TableHead>
-                          <TableHead>Team</TableHead>
-                          <TableHead className="w-[100px]">Members</TableHead>
-                          <TableHead className="w-[100px]">Score</TableHead>
-                          <TableHead className="w-[120px]">Tier</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredTeams.map((t, i) => (
-                          <TableRow
-                            key={t.id}
-                            onClick={() => setOpenTeamId(t.id)}
-                            className="cursor-pointer"
-                          >
-                            <TableCell>
-                              <span
-                                className={`font-bold ${
-                                  t.rank === 1
-                                    ? "text-yellow-400"
-                                    : t.rank === 2
-                                    ? "text-cyan-300"
-                                    : t.rank === 3
-                                    ? "text-amber-400"
-                                    : "text-muted-foreground"
-                                }`}
-                              >
-                                #{t.rank}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-lg border bg-muted flex items-center justify-center overflow-hidden shrink-0">
-                                  <Image
-                                    src={`/tiers/${t.tier.toLowerCase()}.png`}
-                                    alt={t.tier}
-                                    width={26}
-                                    height={26}
-                                    className="object-contain"
-                                  />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold truncate">
-                                    {t.name}
-                                  </p>
-                                  <p className="text-[11px] text-muted-foreground truncate">
-                                    {t.demandName}
-                                    {t.internshipName && ` · ${t.internshipName}`}
-                                  </p>
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Users className="w-3 h-3" />
-                                {t.memberCount}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <span
-                                className={`text-sm font-bold ${TIER_COLOR[t.tier]}`}
-                              >
-                                {t.score}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`gap-1.5 ${TIER_BADGE_BG[t.tier]}`}
-                              >
-                                <Image
-                                  src={`/tiers/${t.tier.toLowerCase()}.png`}
-                                  alt={t.tier}
-                                  width={12}
-                                  height={12}
-                                />
-                                {t.tier}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  {/* Mobile list */}
-                  <div className="md:hidden divide-y">
-                    {filteredTeams.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setOpenTeamId(t.id)}
-                        className="w-full text-left px-4 py-3 hover:bg-accent transition-colors"
+          ) : filteredUsers.length === 0 ? (
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <Trophy className="w-8 h-8 text-muted-foreground mb-4" />
+              <h3 className="text-sm font-semibold mb-1">No students found</h3>
+              <p className="text-xs text-muted-foreground max-w-[260px]">
+                {search || tierFilter !== "all"
+                  ? "Try clearing filters or search"
+                  : "No students have joined yet"}
+              </p>
+            </CardContent>
+          ) : (
+            <>
+              {/* Desktop table */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[70px]">Rank</TableHead>
+                      <TableHead>Student</TableHead>
+                      <TableHead className="w-[90px]">Teams</TableHead>
+                      <TableHead className="w-[90px]">Exams</TableHead>
+                      <TableHead className="w-[110px]">Score</TableHead>
+                      <TableHead className="w-[90px]">%</TableHead>
+                      <TableHead className="w-[130px]">Tier</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers.map((u) => (
+                      <TableRow
+                        key={u.id}
+                        onClick={() => setOpenUserId(u.id)}
+                        className="cursor-pointer"
                       >
-                        <div className="flex items-center gap-3">
+                        <TableCell>
                           <span
-                            className={`text-xs font-bold w-6 shrink-0 ${
-                              t.rank === 1
+                            className={`font-bold ${
+                              u.rank === 1
                                 ? "text-yellow-400"
-                                : t.rank <= 3
+                                : u.rank === 2
                                 ? "text-cyan-300"
+                                : u.rank === 3
+                                ? "text-amber-400"
                                 : "text-muted-foreground"
                             }`}
                           >
-                            #{t.rank}
+                            #{u.rank}
                           </span>
-                          <div className="w-8 h-8 rounded-lg border bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className="relative shrink-0">
+                              <Avatar className="w-9 h-9">
+                                <AvatarImage src={u.image ?? undefined} />
+                                <AvatarFallback>
+                                  {initials(u.name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <Image
+                                src={`/tiers/${u.tier.toLowerCase()}.png`}
+                                alt={u.tier}
+                                width={14}
+                                height={14}
+                                className="absolute -bottom-1 -right-1 object-contain"
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold truncate">
+                                {u.name}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground truncate">
+                                {u.headline || u.email}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Users className="w-3 h-3" />
+                            {u.teamCount}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">
+                            {u.examCount}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={`text-sm font-bold ${TIER_COLOR[u.tier]}`}
+                          >
+                            {u.totalScore}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">
+                            {u.percentage}%
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`gap-1.5 ${TIER_BADGE_BG[u.tier]}`}
+                          >
                             <Image
-                              src={`/tiers/${t.tier.toLowerCase()}.png`}
-                              alt={t.tier}
-                              width={22}
-                              height={22}
-                              className="object-contain"
+                              src={`/tiers/${u.tier.toLowerCase()}.png`}
+                              alt={u.tier}
+                              width={12}
+                              height={12}
                             />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold truncate">
-                              {t.name}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground truncate">
-                              {t.demandName} · {t.memberCount} members
-                            </p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p
-                              className={`text-sm font-bold ${TIER_COLOR[t.tier]}`}
-                            >
-                              {t.score}
-                            </p>
-                            <p
-                              className={`text-[9px] ${TIER_COLOR[t.tier]}`}
-                            >
-                              {t.tier}
-                            </p>
-                          </div>
-                        </div>
-                      </button>
+                            {u.tier}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </div>
-                </>
-              )}
-            </Card>
-          </main>
-        </div>
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile list */}
+              <div className="md:hidden divide-y">
+                {filteredUsers.map((u) => (
+                  <button
+                    key={u.id}
+                    onClick={() => setOpenUserId(u.id)}
+                    className="w-full text-left px-4 py-3 hover:bg-accent transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`text-xs font-bold w-7 shrink-0 ${
+                          u.rank === 1
+                            ? "text-yellow-400"
+                            : u.rank <= 3
+                            ? "text-cyan-300"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        #{u.rank}
+                      </span>
+                      <div className="relative shrink-0">
+                        <Avatar className="w-8 h-8">
+                          <AvatarImage src={u.image ?? undefined} />
+                          <AvatarFallback>{initials(u.name)}</AvatarFallback>
+                        </Avatar>
+                        <Image
+                          src={`/tiers/${u.tier.toLowerCase()}.png`}
+                          alt={u.tier}
+                          width={12}
+                          height={12}
+                          className="absolute -bottom-1 -right-1 object-contain"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate">
+                          {u.name}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {u.teamCount} teams · {u.examCount} exams
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={`text-sm font-bold ${TIER_COLOR[u.tier]}`}>
+                          {u.totalScore}
+                        </p>
+                        <p className={`text-[9px] ${TIER_COLOR[u.tier]}`}>
+                          {u.tier} · {u.percentage}%
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </Card>
       </section>
 
       {/* ============ DRAWER ============ */}
-      <TeamDetailDrawer
-        teamId={openTeamId}
-        onClose={() => setOpenTeamId(null)}
+      <UserDetailDrawer
+        userId={openUserId}
+        onClose={() => setOpenUserId(null)}
       />
     </div>
   );
@@ -475,50 +409,56 @@ export default function TierListPageClient() {
 // PODIUM
 // =====================================================
 function Podium({
-  teams,
+  users,
   onOpen,
 }: {
-  teams: TierListTeam[];
+  users: TierUser[];
   onOpen: (id: string) => void;
 }) {
   // reorder: 2nd, 1st, 3rd (visual podium)
   const order = [1, 0, 2];
-  const heights = ["h-24", "h-32", "h-20"];
+  const heights = ["h-28", "h-36", "h-24"];
 
   return (
     <div className="grid grid-cols-3 gap-3">
       {order.map((idx, i) => {
-        const t = teams[idx];
-        if (!t) return <div key={i} />;
-        const color = TIER_COLOR[t.tier];
+        const u = users[idx];
+        if (!u) return <div key={i} />;
+        const color = TIER_COLOR[u.tier];
 
         return (
           <motion.button
-            key={t.id}
+            key={u.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1, duration: 0.5 }}
-            onClick={() => onOpen(t.id)}
-            className={`relative flex flex-col items-center justify-end ${heights[i]} 
-                        rounded-2xl border bg-card hover:border-primary/40 
+            onClick={() => onOpen(u.id)}
+            className={`relative flex flex-col items-center justify-end ${heights[i]}
+                        rounded-2xl border bg-card hover:border-primary/40
                         transition-colors overflow-hidden p-3`}
           >
             <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-primary/5 to-transparent" />
 
-            <div className="relative w-12 h-12 rounded-xl border bg-muted flex items-center justify-center overflow-hidden mb-2">
+            <div className="relative mb-2">
+              <Avatar className="w-12 h-12 rounded-xl">
+                <AvatarImage src={u.image ?? undefined} />
+                <AvatarFallback>{initials(u.name)}</AvatarFallback>
+              </Avatar>
               <Image
-                src={`/tiers/${t.tier.toLowerCase()}.png`}
-                alt={t.tier}
-                width={36}
-                height={36}
-                className="object-contain"
+                src={`/tiers/${u.tier.toLowerCase()}.png`}
+                alt={u.tier}
+                width={16}
+                height={16}
+                className="absolute -bottom-1 -right-1 object-contain"
               />
             </div>
-            <p className={`text-xs font-bold ${color}`}>#{t.rank}</p>
+            <p className={`text-xs font-bold ${color}`}>#{u.rank}</p>
             <p className="text-[11px] font-semibold truncate w-full text-center mt-0.5">
-              {t.name}
+              {u.name}
             </p>
-            <p className={`text-[10px] font-bold ${color} mt-0.5`}>{t.score}</p>
+            <p className={`text-[10px] font-bold ${color} mt-0.5`}>
+              {u.totalScore} pts
+            </p>
           </motion.button>
         );
       })}

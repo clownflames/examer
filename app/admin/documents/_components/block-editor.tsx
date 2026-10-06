@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
-import { MediaPicker } from './media-picker'
+import { MediaPicker } from '@/components/admin/media-picker'
 import type {
   Align,
   ColumnsBlock,

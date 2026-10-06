@@ -9,11 +9,10 @@ import {
   team,
   teamMember,
   user,
-  teamGoals,
-  teamFinalResult,
   payments,
   exams,
   examSubmission,
+  profile,
 } from "@/db/schema";
 import { eq, desc, asc, sql, and, inArray, isNotNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
@@ -115,92 +114,16 @@ export async function getPaidInternshipIds(
 
 export type TierLevel = "Elite" | "Platinum" | "Gold" | "Silver" | "Bronze";
 
-export type TierTeam = {
-  id: string;
-  name: string;
-  score: number;
-  rank: number;
-  tier: TierLevel;
-  memberCount: number;
-  demandName: string;
-  internshipName: string;
-};
-
-export type TierGroup = {
-  demandId: string;
-  demandName: string;
-  demandIconUrl: string | null;
-  teams: TierTeam[];
-};
-
+/**
+ * 0-100 percentage -> tier. Kept in one place so the leaderboard, the podium
+ * and the profile drawer can never disagree on a student's tier.
+ */
 function getTierFromScore(score: number): TierLevel {
   if (score >= 90) return "Elite";
   if (score >= 75) return "Platinum";
   if (score >= 60) return "Gold";
   if (score >= 40) return "Silver";
   return "Bronze";
-}
-
-export async function getTierList(): Promise<TierGroup[]> {
-  try {
-    // All demands
-    const demands = await db
-      .select({
-        id: employeeDemand.id,
-        name: employeeDemand.name,
-        iconUrl: employeeDemand.iconUrl,
-      })
-      .from(employeeDemand)
-      .orderBy(employeeDemand.name);
-
-    if (demands.length === 0) return [];
-
-    // All teams with scores, joined with demand + internship + member count
-    const rows = await db
-      .select({
-        teamId: team.id,
-        teamName: team.name,
-        teamScore: team.score,
-        demandId: team.demandId,
-        internshipName: internships.name,
-        memberCount: sql<number>`(
-          SELECT COUNT(*)::int FROM ${teamMember} 
-          WHERE ${teamMember.teamId} = ${team.id}
-        )`,
-      })
-      .from(team)
-      .leftJoin(internships, eq(team.internshipId, internships.id))
-      .orderBy(desc(team.score));
-
-    // Group by demand
-    const grouped: TierGroup[] = demands.map((d) => {
-      const demandTeams = rows
-        .filter((r) => r.demandId === d.id)
-        .map((r, idx) => ({
-          id: r.teamId,
-          name: r.teamName,
-          score: r.teamScore,
-          rank: idx + 1,
-          tier: getTierFromScore(r.teamScore),
-          memberCount: r.memberCount ?? 0,
-          demandName: d.name,
-          internshipName: r.internshipName ?? "—",
-        }));
-
-      return {
-        demandId: d.id,
-        demandName: d.name,
-        demandIconUrl: d.iconUrl,
-        teams: demandTeams,
-      };
-    });
-
-    // Only return demands that have at least 1 team
-    return grouped.filter((g) => g.teams.length > 0);
-  } catch (error) {
-    console.error("getTierList error:", error);
-    return [];
-  }
 }
 
 
@@ -351,242 +274,401 @@ export async function getUpcomingDeadlines(): Promise<UpcomingInternship[]> {
 
 
 // =====================================================
-// TIERLIST PAGE
+// TIERLIST PAGE — users ranked by their running total score
 // =====================================================
 
-export type TierListTeam = {
+/**
+ * One profile on the tier list.
+ *
+ * `totalScore` is the raw running sum of everything the student has scored so
+ * far — every team they are in plus every exam they submitted — and that is
+ * what decides the rank.
+ *
+ * `percentage` normalises those same points against what each team/exam was
+ * actually worth, so someone in 8 teams is not handed a bigger tier than
+ * someone in 1 for the same result. That is what decides the tier.
+ */
+export type TierUser = {
+  id: string;
+  name: string;
+  email: string;
+  image: string | null;
+  headline: string | null;
+  rank: number;
+  tier: TierLevel;
+  totalScore: number;
+  teamScore: number;
+  examScore: number;
+  percentage: number;
+  teamCount: number;
+  examCount: number;
+};
+
+type ScoreBucket = {
+  teamScore: number;
+  examScore: number;
+  /** Points earned, each activity capped at what it was worth. */
+  earned: number;
+  /** Points that were on offer across those activities. */
+  available: number;
+  teamCount: number;
+  examCount: number;
+};
+
+function emptyBucket(): ScoreBucket {
+  return {
+    teamScore: 0,
+    examScore: 0,
+    earned: 0,
+    available: 0,
+    teamCount: 0,
+    examCount: 0,
+  };
+}
+
+/** 0-100, weighted by what each team/exam was worth. */
+function bucketPercentage(bucket: ScoreBucket): number {
+  if (bucket.available <= 0) return 0;
+  return Math.min(100, Math.max(0, (bucket.earned / bucket.available) * 100));
+}
+
+/**
+ * Running totals for every student. Built from their team memberships and
+ * their latest submission per exam — a retake replaces the earlier attempt
+ * instead of stacking on top of it.
+ */
+async function getScoreBuckets(): Promise<Map<string, ScoreBucket>> {
+  const buckets = new Map<string, ScoreBucket>();
+  const bucketFor = (userId: string) => {
+    let bucket = buckets.get(userId);
+    if (!bucket) {
+      bucket = emptyBucket();
+      buckets.set(userId, bucket);
+    }
+    return bucket;
+  };
+
+  // ---- teams ----
+  const teamRows = await db
+    .select({
+      userId: teamMember.userId,
+      score: team.score,
+      // A team's score is free-form for the admin, so cap it at the
+      // internship's out-of score before it feeds the percentage.
+      earned: sql<number>`LEAST(${team.score}::numeric, GREATEST(${internships.totalScore}, 1))::float8`,
+      available: sql<number>`GREATEST(${internships.totalScore}, 1)::float8`,
+    })
+    .from(teamMember)
+    .innerJoin(team, eq(teamMember.teamId, team.id))
+    .innerJoin(internships, eq(team.internshipId, internships.id));
+
+  for (const row of teamRows) {
+    const bucket = bucketFor(row.userId);
+    bucket.teamScore += row.score ?? 0;
+    bucket.teamCount += 1;
+    bucket.earned += Number(row.earned ?? 0);
+    bucket.available += Number(row.available ?? 0);
+  }
+
+  // ---- exams (latest attempt per exam) ----
+  // DISTINCT ON forces the grouped keys to lead the ORDER BY.
+  const submissions = await db
+    .selectDistinctOn([examSubmission.userId, examSubmission.examId], {
+      userId: examSubmission.userId,
+      examId: examSubmission.examId,
+      answers: examSubmission.answers,
+    })
+    .from(examSubmission)
+    .where(isNotNull(examSubmission.submittedAt))
+    .orderBy(
+      asc(examSubmission.userId),
+      asc(examSubmission.examId),
+      desc(examSubmission.submittedAt),
+      desc(examSubmission.id)
+    );
+
+  const examMarks = new Map<string, number>();
+  if (submissions.length > 0) {
+    const examRows = await db
+      .select({ id: exams.id, totalMarks: exams.totalMarks })
+      .from(exams)
+      .where(
+        inArray(
+          exams.id,
+          submissions.map((s) => s.examId)
+        )
+      );
+    for (const exam of examRows) examMarks.set(exam.id, exam.totalMarks ?? 0);
+  }
+
+  for (const submission of submissions) {
+    const meta = readSubmissionMeta(submission.answers);
+    const score = meta.score ?? 0;
+    const available = meta.totalMarks ?? examMarks.get(submission.examId) ?? 0;
+
+    const bucket = bucketFor(submission.userId);
+    bucket.examScore += score;
+    bucket.examCount += 1;
+    bucket.earned += Math.min(score, available);
+    bucket.available += available;
+  }
+
+  return buckets;
+}
+
+/** Everyone on the tier list, highest running total first. */
+export async function getUserTierList(): Promise<TierUser[]> {
+  try {
+    const [users, buckets] = await Promise.all([
+      db
+        .select({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image,
+          headline: profile.headline,
+        })
+        .from(user)
+        .leftJoin(profile, eq(profile.userId, user.id))
+        .where(eq(user.role, "user")),
+      getScoreBuckets(),
+    ]);
+
+    const rows: TierUser[] = users.map((account) => {
+      const bucket = buckets.get(account.id) ?? emptyBucket();
+      const percentage = bucketPercentage(bucket);
+      return {
+        id: account.id,
+        name: account.name,
+        email: account.email,
+        image: account.image,
+        headline: account.headline,
+        rank: 0,
+        tier: getTierFromScore(percentage),
+        totalScore: bucket.teamScore + bucket.examScore,
+        teamScore: bucket.teamScore,
+        examScore: bucket.examScore,
+        percentage: Math.round(percentage * 10) / 10,
+        teamCount: bucket.teamCount,
+        examCount: bucket.examCount,
+      };
+    });
+
+    rows.sort(
+      (a, b) =>
+        b.totalScore - a.totalScore ||
+        b.percentage - a.percentage ||
+        a.name.localeCompare(b.name)
+    );
+
+    // Equal totals share a rank.
+    let lastScore = Number.NaN;
+    let lastRank = 0;
+    return rows.map((row, i) => {
+      if (row.totalScore !== lastScore) {
+        lastRank = i + 1;
+        lastScore = row.totalScore;
+      }
+      return { ...row, rank: lastRank };
+    });
+  } catch (error) {
+    console.error("getUserTierList error:", error);
+    return [];
+  }
+}
+
+export type UserTierTeam = {
   id: string;
   name: string;
   score: number;
-  rank: number;
-  tier: TierLevel;
-  memberCount: number;
-  demandId: string;
+  available: number;
+  percentage: number;
   demandName: string;
-  demandIconUrl: string | null;
-  internshipName: string | null;
-  createdAt: Date;
+  internshipName: string;
+  memberCount: number;
 };
 
-export type DemandSummary = {
+export type UserTierExam = {
   id: string;
   name: string;
-  iconUrl: string | null;
-  teamCount: number;
+  internshipName: string;
+  score: number;
+  totalMarks: number;
+  percentage: number;
+  passed: boolean | null;
+  submittedAt: string | null;
 };
 
-export type TeamDetail = TierListTeam & {
-  members: {
-    id: string;
-    userId: string;
-    name: string;
-    email: string;
-    image: string | null;
-  }[];
-  goals: {
-    id: string;
-    text: string;
-    createdAt: Date;
-  }[];
-  finalResults: {
-    id: string;
-    score: number;
-    result: string;
-    createdAt: Date;
-  }[];
-  internship: {
-    id: string;
-    name: string;
-    description: string | null;
-    examinerName: string | null;
-    examinerPhotoUrl: string | null;
-    totalScore: number;
-  } | null;
+export type UserTierDetail = TierUser & {
+  bio: string | null;
+  city: string | null;
+  branch: string | null;
+  collegeName: string | null;
+  skills: string[];
+  teams: UserTierTeam[];
+  exams: UserTierExam[];
 };
 
-// All demands with team counts (for sidebar)
-export async function getDemandsWithCounts(): Promise<DemandSummary[]> {
+/** Full profile + every team and exam behind their score, for the drawer. */
+export async function getUserTierDetail(
+  userId: string
+): Promise<UserTierDetail | null> {
   try {
-    const demands = await db
+    const [account] = await db
       .select({
-        id: employeeDemand.id,
-        name: employeeDemand.name,
-        iconUrl: employeeDemand.iconUrl,
-        teamCount: sql<number>`(
-          SELECT COUNT(*)::int FROM ${team}
-          WHERE ${team.demandId} = ${employeeDemand.id}
-        )`,
-      })
-      .from(employeeDemand)
-      .orderBy(employeeDemand.name);
-
-    return demands;
-  } catch (error) {
-    console.error("getDemandsWithCounts error:", error);
-    return [];
-  }
-}
-
-// All teams (optionally filtered by demand)
-export async function getTierListTeams(
-  demandId?: string | null
-): Promise<TierListTeam[]> {
-  try {
-    const baseQuery = db
-      .select({
-        id: team.id,
-        name: team.name,
-        score: team.score,
-        demandId: team.demandId,
-        demandName: employeeDemand.name,
-        demandIconUrl: employeeDemand.iconUrl,
-        internshipName: internships.name,
-        createdAt: team.createdAt,
-        memberCount: sql<number>`(
-          SELECT COUNT(*)::int FROM ${teamMember}
-          WHERE ${teamMember.teamId} = ${team.id}
-        )`,
-      })
-      .from(team)
-      .leftJoin(employeeDemand, eq(team.demandId, employeeDemand.id))
-      .leftJoin(internships, eq(team.internshipId, internships.id));
-
-    const rows = await (demandId
-      ? baseQuery.where(eq(team.demandId, demandId))
-      : baseQuery
-    ).orderBy(desc(team.score));
-
-    // rank per demand
-    const rankMap = new Map<string, number>();
-    return rows.map((r) => {
-      const nextRank = (rankMap.get(r.demandId) ?? 0) + 1;
-      rankMap.set(r.demandId, nextRank);
-      return {
-        id: r.id,
-        name: r.name,
-        score: r.score,
-        rank: nextRank,
-        tier: getTierFromScore(r.score),
-        memberCount: r.memberCount ?? 0,
-        demandId: r.demandId,
-        demandName: r.demandName ?? "Unknown",
-        demandIconUrl: r.demandIconUrl,
-        internshipName: r.internshipName,
-        createdAt: r.createdAt,
-      };
-    });
-  } catch (error) {
-    console.error("getTierListTeams error:", error);
-    return [];
-  }
-}
-
-// Full team detail for drawer
-export async function getTeamDetail(
-  teamId: string
-): Promise<TeamDetail | null> {
-  try {
-    const [row] = await db
-      .select({
-        id: team.id,
-        name: team.name,
-        score: team.score,
-        demandId: team.demandId,
-        demandName: employeeDemand.name,
-        demandIconUrl: employeeDemand.iconUrl,
-        internshipId: team.internshipId,
-        internshipName: internships.name,
-        internshipDesc: internships.description,
-        examinerName: internships.examinerName,
-        examinerPhotoUrl: internships.examinerPhotoUrl,
-        totalScore: internships.totalScore,
-        createdAt: team.createdAt,
-      })
-      .from(team)
-      .leftJoin(employeeDemand, eq(team.demandId, employeeDemand.id))
-      .leftJoin(internships, eq(team.internshipId, internships.id))
-      .where(eq(team.id, teamId))
-      .limit(1);
-
-    if (!row) return null;
-
-    const members = await db
-      .select({
-        id: teamMember.id,
-        userId: teamMember.userId,
+        id: user.id,
         name: user.name,
         email: user.email,
         image: user.image,
+        headline: profile.headline,
+        bio: profile.bio,
+        city: profile.city,
+        branch: profile.branch,
+        collegeName: profile.collegeName,
+        skills: profile.skills,
+      })
+      .from(user)
+      .leftJoin(profile, eq(profile.userId, user.id))
+      .where(eq(user.id, userId))
+      .limit(1);
+
+    if (!account) return null;
+
+    const teamRows = await db
+      .select({
+        id: team.id,
+        name: team.name,
+        score: team.score,
+        available: sql<number>`GREATEST(${internships.totalScore}, 1)::float8`,
+        demandName: employeeDemand.name,
+        internshipName: internships.name,
+        memberCount: sql<number>`(
+          SELECT COUNT(*)::int FROM ${teamMember} m
+          WHERE m.team_id = ${team.id}
+        )`,
       })
       .from(teamMember)
-      .leftJoin(user, eq(teamMember.userId, user.id))
-      .where(eq(teamMember.teamId, teamId));
-
-    const goals = await db
-      .select({
-        id: teamGoals.id,
-        text: teamGoals.text,
-        createdAt: teamGoals.createdAt,
-      })
-      .from(teamGoals)
-      .where(eq(teamGoals.teamId, teamId))
-      .orderBy(desc(teamGoals.createdAt));
-
-    const finalResults = await db
-      .select({
-        id: teamFinalResult.id,
-        score: teamFinalResult.score,
-        result: teamFinalResult.result,
-        createdAt: teamFinalResult.createdAt,
-      })
-      .from(teamFinalResult)
-      .where(eq(teamFinalResult.teamId, teamId))
-      .orderBy(desc(teamFinalResult.createdAt));
-
-    // rank within demand
-    const allInDemand = await db
-      .select({ score: team.score, id: team.id })
-      .from(team)
-      .where(eq(team.demandId, row.demandId))
+      .innerJoin(team, eq(teamMember.teamId, team.id))
+      .leftJoin(employeeDemand, eq(team.demandId, employeeDemand.id))
+      .leftJoin(internships, eq(team.internshipId, internships.id))
+      .where(eq(teamMember.userId, userId))
       .orderBy(desc(team.score));
 
-    const rank =
-      allInDemand.findIndex((t) => t.id === teamId) + 1 || allInDemand.length;
+    const teams: UserTierTeam[] = teamRows.map((row) => {
+      const available = Number(row.available ?? 0) || 1;
+      const score = row.score ?? 0;
+      return {
+        id: row.id,
+        name: row.name,
+        score,
+        available,
+        percentage: Math.min(100, Math.round((score / available) * 100)),
+        demandName: row.demandName ?? "Unknown",
+        internshipName: row.internshipName ?? "—",
+        memberCount: row.memberCount ?? 0,
+      };
+    });
+
+    const submissions = await db
+      .selectDistinctOn([examSubmission.userId, examSubmission.examId], {
+        examId: examSubmission.examId,
+        answers: examSubmission.answers,
+        submittedAt: examSubmission.submittedAt,
+      })
+      .from(examSubmission)
+      .where(
+        and(
+          eq(examSubmission.userId, userId),
+          isNotNull(examSubmission.submittedAt)
+        )
+      )
+      .orderBy(
+        asc(examSubmission.userId),
+        asc(examSubmission.examId),
+        desc(examSubmission.submittedAt),
+        desc(examSubmission.id)
+      );
+
+    const examInfo = new Map<
+      string,
+      { name: string; internshipName: string; totalMarks: number }
+    >();
+    if (submissions.length > 0) {
+      const examRows = await db
+        .select({
+          id: exams.id,
+          name: exams.name,
+          totalMarks: exams.totalMarks,
+          internshipName: internships.name,
+        })
+        .from(exams)
+        .leftJoin(internships, eq(exams.internshipId, internships.id))
+        .where(inArray(exams.id, submissions.map((s) => s.examId)));
+
+      for (const exam of examRows) {
+        examInfo.set(exam.id, {
+          name: exam.name,
+          internshipName: exam.internshipName ?? "—",
+          totalMarks: exam.totalMarks ?? 0,
+        });
+      }
+    }
+
+    const examRows: UserTierExam[] = submissions
+      .map((submission) => {
+        const meta = readSubmissionMeta(submission.answers);
+        const info = examInfo.get(submission.examId);
+        const score = meta.score ?? 0;
+        const totalMarks = meta.totalMarks ?? info?.totalMarks ?? 0;
+        return {
+          id: submission.examId,
+          name: info?.name ?? "Exam",
+          internshipName: info?.internshipName ?? "—",
+          score,
+          totalMarks,
+          percentage:
+            totalMarks > 0
+              ? Math.min(100, Math.round((score / totalMarks) * 100))
+              : 0,
+          passed: meta.passed,
+          submittedAt: submission.submittedAt
+            ? new Date(submission.submittedAt).toISOString()
+            : null,
+        };
+      })
+      .sort((a, b) => b.percentage - a.percentage);
+
+    // Reuse the list so the drawer can never disagree with the table.
+    // Admins are not on the tier list, so they get a neutral zeroed row.
+    const ranked = await getUserTierList();
+    const base: TierUser = ranked.find((u) => u.id === userId) ?? {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      image: account.image,
+      headline: account.headline,
+      rank: 0,
+      tier: "Bronze",
+      totalScore: 0,
+      teamScore: 0,
+      examScore: 0,
+      percentage: 0,
+      teamCount: 0,
+      examCount: 0,
+    };
 
     return {
-      id: row.id,
-      name: row.name,
-      score: row.score,
-      rank,
-      tier: getTierFromScore(row.score),
-      memberCount: members.length,
-      demandId: row.demandId,
-      demandName: row.demandName ?? "Unknown",
-      demandIconUrl: row.demandIconUrl,
-      internshipName: row.internshipName,
-      createdAt: row.createdAt,
-      members: members.map((m) => ({
-        id: m.id,
-        userId: m.userId,
-        name: m.name ?? "Unknown",
-        email: m.email ?? "",
-        image: m.image,
-      })),
-      goals,
-      finalResults,
-      internship: row.internshipId
-        ? {
-            id: row.internshipId,
-            name: row.internshipName ?? "",
-            description: row.internshipDesc,
-            examinerName: row.examinerName,
-            examinerPhotoUrl: row.examinerPhotoUrl,
-            totalScore: row.totalScore ?? 100,
-          }
-        : null,
+      ...base,
+      bio: account.bio,
+      city: account.city,
+      branch: account.branch,
+      collegeName: account.collegeName,
+      skills: Array.isArray(account.skills) ? (account.skills as string[]) : [],
+      teams,
+      exams: examRows,
     };
   } catch (error) {
-    console.error("getTeamDetail error:", error);
+    console.error("getUserTierDetail error:", error);
     return null;
   }
 }
@@ -960,8 +1042,25 @@ export async function createRegistrationAndOrder(
       };
     }
 
+    // ---- already registered before the deadline? ----
+    // Looked up before the deadline check: the cutoff is meant to stop NEW
+    // registrations, not to strand somebody who already filled the form.
+    const [existingReg] = await db
+      .select({ id: internshipRegistration.id })
+      .from(internshipRegistration)
+      .where(
+        and(
+          eq(internshipRegistration.userId, userId),
+          eq(internshipRegistration.internshipId, internshipId)
+        )
+      )
+      .orderBy(asc(internshipRegistration.createdAt))
+      .limit(1);
+
     // ---- closed? ----
+    // Only for people who have no application yet.
     if (
+      !existingReg &&
       internship.lastSubmissionDate &&
       new Date(internship.lastSubmissionDate).getTime() < Date.now()
     ) {
@@ -1011,18 +1110,6 @@ export async function createRegistrationAndOrder(
     }
 
     // ---- reuse the application instead of creating a duplicate ----
-    const [existingReg] = await db
-      .select({ id: internshipRegistration.id })
-      .from(internshipRegistration)
-      .where(
-        and(
-          eq(internshipRegistration.userId, userId),
-          eq(internshipRegistration.internshipId, internshipId)
-        )
-      )
-      .orderBy(asc(internshipRegistration.createdAt))
-      .limit(1);
-
     const registrationId = existingReg?.id ?? crypto.randomUUID();
     const amountRupees = effectiveAmountRupees(internship);
 
@@ -1305,6 +1392,14 @@ export async function syncPaymentStatus(
 // =====================================================
 export type RegistrationStatus = {
   state: "none" | "paid";
+  /**
+   * True when an application row already exists for this internship.
+   *
+   * `state` alone cannot tell "never applied" apart from "applied but never
+   * paid", and the deadline needs that difference: someone who applied before
+   * the cutoff must still be able to finish paying after it.
+   */
+  hasRegistration: boolean;
   /** Prefill the form when they come back after a failed/abandoned attempt. */
   coverLetter: string | null;
   resumeUrl: string | null;
@@ -1320,6 +1415,7 @@ export async function getMyRegistrationStatus(
 ): Promise<RegistrationStatus> {
   const empty: RegistrationStatus = {
     state: "none",
+    hasRegistration: false,
     coverLetter: null,
     resumeUrl: null,
     registrationId: null,
@@ -1382,6 +1478,7 @@ export async function getMyRegistrationStatus(
     if (paid) {
       return {
         state: "paid",
+        hasRegistration: true,
         coverLetter: reg.coverLetter,
         resumeUrl: reg.resumeUrl,
         registrationId: reg.id,
@@ -1394,6 +1491,7 @@ export async function getMyRegistrationStatus(
 
     return {
       state: "none",
+      hasRegistration: true,
       coverLetter: reg.coverLetter,
       resumeUrl: reg.resumeUrl,
       registrationId: reg.id,
@@ -1433,19 +1531,22 @@ type SubmissionMeta = {
 
 function readSubmissionMeta(raw: unknown): {
   score: number | null;
+  totalMarks: number | null;
   passed: boolean | null;
   pendingReview: number;
 } {
   if (!raw || typeof raw !== "object") {
-    return { score: null, passed: null, pendingReview: 0 };
+    return { score: null, totalMarks: null, passed: null, pendingReview: 0 };
   }
   const meta = raw as SubmissionMeta & {
     score?: number;
+    totalMarks?: number;
     passed?: boolean | null;
     pendingReview?: number;
   };
   return {
     score: typeof meta.score === "number" ? meta.score : null,
+    totalMarks: typeof meta.totalMarks === "number" ? meta.totalMarks : null,
     passed: typeof meta.passed === "boolean" ? meta.passed : null,
     pendingReview:
       typeof meta.pendingReview === "number" ? meta.pendingReview : 0,

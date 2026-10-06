@@ -42,10 +42,16 @@ export function MediaUploadDialog({
   open,
   onOpenChange,
   onUploaded,
+  onUploadedUrls,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   onUploaded?: () => void
+  /**
+   * Reports the public URLs of everything that uploaded successfully, in
+   * order. Used by the media picker to use the new image straight away.
+   */
+  onUploadedUrls?: (urls: string[]) => void
 }) {
   const [pending, setPending] = React.useState<Pending[]>([])
   const [progress, setProgress] = React.useState<Progress>('idle')
@@ -125,6 +131,7 @@ export function MediaUploadDialog({
     setError(null)
 
     let successCount = 0
+    const uploadedUrls: string[] = []
 
     for (const item of pending) {
       try {
@@ -165,6 +172,7 @@ export function MediaUploadDialog({
           throw new Error(save.error)
         }
 
+        uploadedUrls.push(presign.publicUrl)
         successCount += 1
       } catch (err) {
         console.error('[media upload]', err)
@@ -172,6 +180,11 @@ export function MediaUploadDialog({
           err instanceof Error ? err.message : 'Unknown upload error'
         setError(`${item.file.name}: ${msg}`)
         setProgress('error')
+        // Hand back whatever did land before the failure.
+        if (uploadedUrls.length > 0) {
+          onUploadedUrls?.(uploadedUrls)
+          onUploaded?.()
+        }
         return
       }
     }
@@ -183,6 +196,7 @@ export function MediaUploadDialog({
         : `${successCount} images uploaded`
     )
     onUploaded?.()
+    onUploadedUrls?.(uploadedUrls)
 
     // Reset & close after a beat
     setTimeout(() => {

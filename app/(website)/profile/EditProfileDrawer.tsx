@@ -59,11 +59,18 @@ export default function EditProfileDrawer({
   onClose,
   initialData,
   onUpdated,
+  side = "right",
+  heading = "Edit Profile",
+  description = "Keep your profile updated to get better matches.",
 }: {
   open: boolean;
   onClose: () => void;
   initialData: ProfileData;
   onUpdated: (d: Partial<ProfileData>) => void;
+  /** The profile page uses a side panel; the reminder popup uses a bottom sheet. */
+  side?: "right" | "bottom";
+  heading?: string;
+  description?: string;
 }) {
   const [draft, setDraft] = useState<ProfileData>(initialData);
   const [isPending, startTransition] = useTransition();
@@ -176,14 +183,16 @@ export default function EditProfileDrawer({
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
-        side="right"
-        className="w-full sm:max-w-xl p-0 flex flex-col"
+        side={side}
+        className={
+          side === "bottom"
+            ? "w-full p-0 flex flex-col max-h-[88vh] rounded-t-2xl"
+            : "w-full sm:max-w-xl p-0 flex flex-col"
+        }
       >
         <SheetHeader className="p-6 pb-4 border-b">
-          <SheetTitle>Edit Profile</SheetTitle>
-          <SheetDescription>
-            Keep your profile updated to get better matches.
-          </SheetDescription>
+          <SheetTitle>{heading}</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto p-6">

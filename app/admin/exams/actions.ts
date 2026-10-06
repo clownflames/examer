@@ -1,10 +1,12 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
 import { asc, count, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/db'
 import { exams, examQuestions, internships } from '@/db/schema'
+import { auth } from '@/lib/auth'
 import {
   PAGE_SIZE,
   examFormSchema,
@@ -12,6 +14,30 @@ import {
   type ExamInput,
   type InternshipOption,
 } from './constants'
+import {
+  countPendingDeliveryChecks,
+  getNotificationCountsByExam,
+  getNotificationSummary,
+  getNotificationsForExam,
+  notifyStudentsOfExam,
+  syncDeliveryStatuses,
+  type ExamNotificationCounts,
+  type NotificationRow,
+  type NotificationSummary,
+} from './notify'
+
+/* -------------------------------------------------------------------------- */
+/*  Admin guard                                                                */
+/* -------------------------------------------------------------------------- */
+
+async function requireAdmin() {
+  const session = await auth.api.getSession({ headers: await headers() })
+  if (!session?.user) throw new Error('Unauthorized')
+  if ((session.user as { role?: string }).role !== 'admin') {
+    throw new Error('Forbidden')
+  }
+  return session.user
+}
 
 /* -------------------------------------------------------------------------- */
 /*  List                                                                       */
@@ -116,8 +142,10 @@ function normalize(input: ExamInput) {
   }
 }
 
-export async function createExam(input: ExamInput) {
+export async function createExam(input: ExamInput & { notifyStudents?: boolean }) {
   try {
+    await requireAdmin()
+
     const parsed = examFormSchema.parse(input)
 
     if (
@@ -139,7 +167,57 @@ export async function createExam(input: ExamInput) {
       .returning({ id: exams.id })
 
     revalidatePath('/admin/exams')
-    return { success: true as const, id: created[0].id }
+
+    const id = created[0].id
+
+    // Announce it, but never let a mail problem undo the exam itself.
+    if (input.notifyStudents) {
+      try {
+        const internship = await db
+          .select({ name: internships.name })
+          .from(internships)
+          .where(eq(internships.id, parsed.internshipId))
+          .limit(1)
+
+        const result = await notifyStudentsOfExam({
+          examId: id,
+          examName: parsed.name,
+          internshipId: parsed.internshipId,
+          internshipName: internship[0]?.name ?? 'your programme',
+          durationMinutes: parsed.duration,
+          totalMarks: parsed.totalMarks,
+          passingMarks: parsed.passingMarks ?? null,
+        })
+
+        return {
+          success: true as const,
+          id,
+          notified: {
+            recipients: result.recipients,
+            sent: result.sent,
+            failed: result.failed,
+            skipped: result.skipped,
+            message: result.message,
+          },
+        }
+      } catch (err) {
+        console.error('createExam notify failed:', err)
+        return {
+          success: true as const,
+          id,
+          notified: {
+            recipients: 0,
+            sent: 0,
+            failed: 0,
+            skipped: true,
+            message:
+              'Exam was created, but the notification step failed. Check the Emails button to retry.',
+          },
+        }
+      }
+    }
+
+    return { success: true as const, id }
   } catch (err) {
     console.error('createExam failed:', err)
     return { success: false as const, error: 'Failed to create exam.' }
@@ -259,4 +337,136 @@ export async function getNextOrderNo(internshipId: string): Promise<number> {
     .where(eq(exams.internshipId, internshipId))
 
   return Number(rows[0]?.maxOrder ?? 0) + 1
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Student notifications                                                      */
+/* -------------------------------------------------------------------------- */
+
+export type NotifyResult = {
+  success: boolean
+  recipients?: number
+  sent?: number
+  failed?: number
+  skipped?: boolean
+  error?: string
+}
+
+/** Announce an existing exam to everyone who has paid for its internship. */
+export async function notifyExamStudents(
+  examId: string
+): Promise<NotifyResult> {
+  try {
+    await requireAdmin()
+
+    const [row] = await db
+      .select({
+        id: exams.id,
+        name: exams.name,
+        internshipId: exams.internshipId,
+        duration: exams.duration,
+        totalMarks: exams.totalMarks,
+        passingMarks: exams.passingMarks,
+        internshipName: internships.name,
+      })
+      .from(exams)
+      .leftJoin(internships, eq(exams.internshipId, internships.id))
+      .where(eq(exams.id, examId))
+      .limit(1)
+
+    if (!row) return { success: false, error: 'Exam not found.' }
+
+    const result = await notifyStudentsOfExam({
+      examId: row.id,
+      examName: row.name,
+      internshipId: row.internshipId,
+      internshipName: row.internshipName ?? 'your programme',
+      durationMinutes: row.duration,
+      totalMarks: row.totalMarks,
+      passingMarks: row.passingMarks,
+    })
+
+    revalidatePath('/admin/exams')
+    return {
+      success: true,
+      recipients: result.recipients,
+      sent: result.sent,
+      failed: result.failed,
+      skipped: result.skipped,
+      ...(result.message ? { error: result.message } : {}),
+    }
+  } catch (err) {
+    console.error('notifyExamStudents failed:', err)
+    return { success: false, error: 'Failed to send notifications.' }
+  }
+}
+
+/**
+ * Asks the provider for the real delivery status of everything still in
+ * flight. Pass an examId to scope it, or omit it to sweep the whole site.
+ */
+export async function syncExamEmailStatuses(
+  examId?: string
+): Promise<
+  | { success: true; checked: number; updated: number; unknown: number }
+  | { success: false; error: string }
+> {
+  try {
+    await requireAdmin()
+    const result = await syncDeliveryStatuses(examId)
+    revalidatePath('/admin/exams')
+    return { success: true, ...result }
+  } catch (err) {
+    console.error('syncExamEmailStatuses failed:', err)
+    return { success: false, error: 'Failed to check delivery status.' }
+  }
+}
+
+export async function getExamEmailStatus(examId: string): Promise<{
+  summary: NotificationSummary
+  rows: NotificationRow[]
+}> {
+  try {
+    await requireAdmin()
+    const [summary, rows] = await Promise.all([
+      getNotificationSummary(examId),
+      getNotificationsForExam(examId),
+    ])
+    return { summary, rows }
+  } catch (err) {
+    console.error('getExamEmailStatus failed:', err)
+    return {
+      summary: {
+        total: 0,
+        delivered: 0,
+        sent: 0,
+        queued: 0,
+        failed: 0,
+        bounced: 0,
+        complained: 0,
+        deliveredTo: 0,
+      },
+      rows: [],
+    }
+  }
+}
+
+export async function getAllEmailNotificationCounts(): Promise<ExamNotificationCounts> {
+  try {
+    await requireAdmin()
+    return await getNotificationCountsByExam()
+  } catch (err) {
+    console.error('getAllEmailNotificationCounts failed:', err)
+    return {}
+  }
+}
+
+export async function getPendingDeliveryCheckCount(): Promise<number> {
+  try {
+    await requireAdmin()
+    return await countPendingDeliveryChecks()
+  } catch (err) {
+    console.error('getPendingDeliveryCheckCount failed:', err)
+    return 0
+  }
 }
