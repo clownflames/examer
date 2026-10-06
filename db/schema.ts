@@ -918,6 +918,21 @@ export const profile = pgTable(
     // Resume
     resumeUrl: text("resume_url"),
 
+    /**
+     * Uploaded resume — stored as the R2 object KEY, never as a public URL.
+     *
+     * This matters: the bucket is reachable on its r2.dev subdomain, so storing
+     * a public URL here would let anyone who ever saw it read this student's
+     * resume. The file is only served through /api/resume/[userId], which
+     * checks that the requester is the owner or an admin.
+     */
+    resumeKey: text("resume_key"),
+
+    /** Original name, so downloads look right without leaking the key. */
+    resumeFileName: text("resume_file_name"),
+
+    resumeSize: integer("resume_size"),
+
     // Meta
     isPublic: boolean("is_public").default(true).notNull(),
     profileCompletion: integer("profile_completion").default(0).notNull(),

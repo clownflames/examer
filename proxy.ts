@@ -73,6 +73,17 @@ export async function proxy(request: NextRequest) {
 
   if (isPublic || isExamStart) {
     res = NextResponse.next()
+  } else if (pathname.startsWith('/api/')) {
+    // API routes must never be answered with a redirect to the login page — a
+    // fetch() would receive an HTML document with status 200 and no useful
+    // signal. Return a JSON 401 instead and let the route run its own
+    // authorization once a session exists.
+    res = sessionCookie
+      ? NextResponse.next()
+      : NextResponse.json(
+          { error: 'Unauthorized' },
+          { status: 401 }
+        )
   } else if (!sessionCookie) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('next', pathname)

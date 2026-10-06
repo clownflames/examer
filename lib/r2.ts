@@ -55,12 +55,24 @@ export function buildAudioKey(
   return `exams/${examId}/${userId}/q-${questionId}-${ts}.webm`;
 }
 
+/**
+ * Object key for an uploaded resume.
+ *
+ * The random UUID matters. This bucket is reachable on its public r2.dev
+ * subdomain, so the application-level access check is only as strong as the
+ * key staying secret. A key of `<userId>/<timestamp>-resume.pdf` would be
+ * guessable — the user id and a millisecond window are both small search
+ * spaces — which would make every student's resume enumerable.
+ *
+ * Making the bucket private is the real fix; the UUID is the safety net for
+ * deployments where that has not happened yet.
+ */
 export function buildResumeKey(
   userId: string,
   filename: string
 ): string {
   const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return `resumes/${userId}/${Date.now()}-${safe}`;
+  return `resumes/${userId}/${crypto.randomUUID()}-${safe}`;
 }
 
 export function buildProfileImageKey(
@@ -143,6 +155,47 @@ export async function getR2ObjectStream(key: string) {
     new GetObjectCommand({ Bucket: R2_BUCKET_NAME, Key: key })
   );
   return res;
+}
+
+/**
+ * Reads the first few bytes of an object.
+ *
+ * Used to check that an uploaded file really is what it claims to be. Both the
+ * MIME type and the file extension come from the client, so neither can be
+ * trusted on its own — a PNG renamed to .pdf arrives as `application/pdf` and
+ * passes both checks. The magic bytes do not lie.
+ */
+export async function getR2ObjectHeadBytes(
+  key: string,
+  length = 8
+): Promise<Uint8Array | null> {
+  try {
+    const client = getR2Client();
+    const res = await client.send(
+      new GetObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        Range: `bytes=0-${Math.max(0, length - 1)}`,
+      })
+    );
+
+    const body = res.Body;
+    if (!body) return null;
+
+    const bytes = await body.transformToByteArray();
+    return bytes.subarray(0, length);
+  } catch {
+    return null;
+  }
+}
+
+/** True when the object starts with the PDF magic number (`%PDF-`). */
+export async function isActuallyPdf(key: string): Promise<boolean> {
+  const bytes = await getR2ObjectHeadBytes(key, 5);
+  if (!bytes || bytes.length < 5) return false;
+
+  const magic = String.fromCharCode(...Array.from(bytes));
+  return magic === "%PDF-";
 }
 
 

@@ -8,7 +8,6 @@ import { db } from '@/db'
 import { exams, examQuestions, internships } from '@/db/schema'
 import { auth } from '@/lib/auth'
 import { LIMITS, rateLimit } from '@/lib/rate-limit'
-import { CACHE_TAGS, invalidateTag } from '@/lib/cache'
 import {
   PAGE_SIZE,
   examFormSchema,

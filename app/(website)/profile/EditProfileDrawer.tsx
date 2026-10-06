@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { motion } from "framer-motion";
 import {
   Loader2,
   Plus,
@@ -33,11 +32,15 @@ import {
   getAvatarUploadUrl,
   type ProfileData,
 } from "./actions";
+import ResumeUploadField from "./ResumeUploadField";
 import { authClient } from "@/lib/auth-client";
 
 // =====================================================
 // Types
 // =====================================================
+/** Profile fields rendered as removable chips rather than full inputs. */
+type ChipKey = "skills" | "languages" | "achievements";
+
 type Experience = {
   company: string;
   role: string;
@@ -74,6 +77,10 @@ export default function EditProfileDrawer({
 }) {
   const [draft, setDraft] = useState<ProfileData>(initialData);
   const [isPending, startTransition] = useTransition();
+  // Uploading a PDF is the expected path; the link field stays opt-in.
+  const [showResumeLink, setShowResumeLink] = useState(
+    Boolean(initialData.resumeUrl)
+  );
 
   // chip inputs
   const [skillInput, setSkillInput] = useState("");
@@ -85,20 +92,21 @@ export default function EditProfileDrawer({
   }
 
   // chip helpers
-  function addChip(
-    key: "skills" | "languages" | "achievements",
-    value: string
-  ) {
+  function addChip(key: ChipKey, value: string) {
     const v = value.trim();
     if (!v) return;
-    if (draft[key].includes(v)) return;
-    update(key, [...draft[key], v] as any);
+    // All three chip fields are string[], so narrowing to ChipKey is enough to
+    // keep these calls type-safe without a cast.
+    const current: string[] = draft[key];
+    if (current.includes(v)) return;
+    update(key, [...current, v]);
   }
-  function removeChip(
-    key: "skills" | "languages" | "achievements",
-    value: string
-  ) {
-    update(key, draft[key].filter((x) => x !== value) as any);
+  function removeChip(key: ChipKey, value: string) {
+    const current: string[] = draft[key];
+    update(
+      key,
+      current.filter((x) => x !== value)
+    );
   }
 
   // experience helpers
@@ -298,11 +306,47 @@ export default function EditProfileDrawer({
                 />
               </div>
 
-              <Field
-                label="Resume URL"
-                value={draft.resumeUrl}
-                onChange={(v) => update("resumeUrl", v)}
+              <ResumeUploadField
+                userId={draft.userId}
+                value={{
+                  resumeKey: draft.resumeKey,
+                  resumeFileName: draft.resumeFileName,
+                  resumeSize: draft.resumeSize,
+                }}
+                onChanged={(next) =>
+                  setDraft((d) => ({
+                    ...d,
+                    resumeKey: next.resumeKey,
+                    resumeFileName: next.resumeFileName,
+                    resumeSize: next.resumeSize,
+                  }))
+                }
               />
+
+              {showResumeLink ? (
+                <>
+                  <Field
+                    label="Resume link"
+                    value={draft.resumeUrl}
+                    onChange={(v) => update("resumeUrl", v)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResumeLink(false)}
+                    className="-mt-2 self-start text-xs text-muted-foreground hover:text-foreground underline"
+                  >
+                    Use my uploaded PDF instead
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowResumeLink(true)}
+                  className="self-start text-xs text-muted-foreground hover:text-foreground underline"
+                >
+                  Keep my resume somewhere else? Add a link instead
+                </button>
+              )}
 
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <div>
@@ -597,7 +641,7 @@ function AvatarUploader({
       setPreview(res.publicUrl);
       onUploaded(res.publicUrl);
       toast.success("Avatar updated!");
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       toast.error("Failed to upload avatar");
     } finally {
@@ -727,6 +771,10 @@ function ChipEditor({
               <button
                 type="button"
                 onClick={() => onRemove(c)}
+                // The button holds only an icon, so it needs a label of its own
+                // or a screen reader announces nothing useful.
+                aria-label={"Remove " + c}
+                title={"Remove " + c}
                 className="hover:bg-muted rounded-sm p-0.5"
               >
                 <X className="w-3 h-3" />

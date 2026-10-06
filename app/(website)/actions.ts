@@ -18,8 +18,7 @@ import { eq, desc, asc, sql, and, inArray, isNotNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { unstable_rethrow } from "next/navigation";
-import { CACHE_TAGS, cachedValue, invalidateTag } from "@/lib/cache";
+import { CACHE_TAGS, cachedValue } from "@/lib/cache";
 import { LIMITS, rateLimit } from "@/lib/rate-limit";
 import { getRazorpay, getRazorpayPublicKeyId } from "@/lib/razorpay";
 
@@ -877,6 +876,29 @@ function isValidHttpUrl(value: string): boolean {
 }
 
 /**
+ * Best-effort absolute origin for the current request.
+ *
+ * Only needed to turn the app's own resume route into an absolute URL for the
+ * registration row. Falls back through the usual platform headers, and returns
+ * an empty string rather than guessing when none are present.
+ */
+async function currentOrigin(): Promise<string> {
+  try {
+    const h = await headers();
+    const host =
+      h.get("x-forwarded-host")?.split(",")[0]?.trim() ??
+      h.get("host") ??
+      "";
+    if (!host) return "";
+    const proto =
+      h.get("x-forwarded-proto")?.split(",")[0]?.trim() ?? "https";
+    return `${proto}://${host}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Amount the user actually has to pay, in RUPEES.
  * sellingPrice wins, then price, then 0 (= free access, no Razorpay needed).
  */
@@ -1156,13 +1178,27 @@ export async function createRegistrationAndOrder(
       };
     }
 
-    const resume = resumeUrl.trim();
+    let resume = resumeUrl.trim();
     if (!resume) {
-      return {
-        success: false,
-        error: "Resume URL is required",
-        code: "validation",
-      };
+      // No pasted link — fall back to a resume they uploaded on their profile.
+      // Storing the app's own route keeps access control intact: /api/resume
+      // re-checks ownership on every read, unlike a bare R2 URL.
+      const [mine] = await db
+        .select({ resumeKey: profile.resumeKey })
+        .from(profile)
+        .where(eq(profile.userId, userId))
+        .limit(1);
+
+      const origin = mine?.resumeKey ? await currentOrigin() : "";
+      if (!origin) {
+        return {
+          success: false,
+          error: "Resume URL is required",
+          code: "validation",
+        };
+      }
+
+      resume = `${origin}/api/resume/${userId}`;
     }
     if (!isValidHttpUrl(resume)) {
       return {
@@ -1477,6 +1513,8 @@ export async function syncPaymentStatus(
 // =====================================================
 export type RegistrationStatus = {
   state: "none" | "paid";
+  /** The signed-in student, so the apply form can build /api/resume/<id>. */
+  userId: string | null;
   /**
    * True when an application row already exists for this internship.
    *
@@ -1488,6 +1526,16 @@ export type RegistrationStatus = {
   /** Prefill the form when they come back after a failed/abandoned attempt. */
   coverLetter: string | null;
   resumeUrl: string | null;
+  /**
+   * True when the student already uploaded a resume PDF on their profile.
+   *
+   * The apply form uses this to decide whether the Resume URL box is required:
+   * an uploaded resume is submitted server-side through the authorized
+   * /api/resume route, so asking for a link as well would be redundant.
+   */
+  hasUploadedResume: boolean;
+  /** Shown in the apply form so the student can see which file will be sent. */
+  uploadedResumeName: string | null;
   registrationId: string | null;
   paidAt: string | null;
   amountPaid: number | null;
@@ -1500,9 +1548,12 @@ export async function getMyRegistrationStatus(
 ): Promise<RegistrationStatus> {
   const empty: RegistrationStatus = {
     state: "none",
+    userId: null,
     hasRegistration: false,
     coverLetter: null,
     resumeUrl: null,
+    hasUploadedResume: false,
+    uploadedResumeName: null,
     registrationId: null,
     paidAt: null,
     amountPaid: null,
@@ -1540,7 +1591,22 @@ export async function getMyRegistrationStatus(
       .orderBy(asc(internshipRegistration.createdAt))
       .limit(1);
 
-    if (!reg) return { ...empty, amountDue };
+    // Read once and reuse for both return paths below.
+    const [prof] = await db
+      .select({
+        resumeKey: profile.resumeKey,
+        resumeFileName: profile.resumeFileName,
+      })
+      .from(profile)
+      .where(eq(profile.userId, userId))
+      .limit(1);
+
+    const hasUploadedResume = Boolean(prof?.resumeKey);
+    const uploadedResumeName = prof?.resumeFileName ?? null;
+
+    if (!reg) {
+      return { ...empty, userId, amountDue, hasUploadedResume, uploadedResumeName };
+    }
 
     // repair a lost callback before deciding what to show
     await reconcilePendingPayment(userId, internshipId);
@@ -1563,9 +1629,12 @@ export async function getMyRegistrationStatus(
     if (paid) {
       return {
         state: "paid",
+        userId,
         hasRegistration: true,
         coverLetter: reg.coverLetter,
         resumeUrl: reg.resumeUrl,
+        hasUploadedResume,
+        uploadedResumeName,
         registrationId: reg.id,
         paidAt: paid.paidAt ? new Date(paid.paidAt).toISOString() : null,
         amountPaid: Number(paid.amount ?? 0),
@@ -1576,9 +1645,12 @@ export async function getMyRegistrationStatus(
 
     return {
       state: "none",
+      userId,
       hasRegistration: true,
       coverLetter: reg.coverLetter,
       resumeUrl: reg.resumeUrl,
+      hasUploadedResume,
+      uploadedResumeName,
       registrationId: reg.id,
       paidAt: null,
       amountPaid: null,

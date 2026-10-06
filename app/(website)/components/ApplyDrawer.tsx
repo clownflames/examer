@@ -47,6 +47,7 @@ import {
   type RegistrationStatus,
   type InternshipExam,
 } from "../actions";
+import ResumeUploadField from "../profile/ResumeUploadField";
 import { cn } from "@/lib/utils";
 
 // =====================================================
@@ -227,6 +228,8 @@ export default function ApplyDrawer({
   // form
   const [coverLetter, setCoverLetter] = useState("");
   const [resumeUrl, setResumeUrl] = useState("");
+  // The link field is opt-in — uploading a PDF is the expected path.
+  const [showResumeLink, setShowResumeLink] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -424,8 +427,12 @@ export default function ApplyDrawer({
       return;
     }
 
-    if (!resumeUrl.trim()) {
-      setError("Resume URL is required");
+    // A pasted link is only required when there is no uploaded resume. With one
+    // uploaded, the server submits it through the authorized /api/resume route.
+    if (!resumeUrl.trim() && !regStatus?.hasUploadedResume) {
+      // Reveal the link field rather than sending them hunting for it.
+      setShowResumeLink(true);
+      setError("Upload a PDF resume, or add a link to one");
       return;
     }
 
@@ -745,25 +752,77 @@ export default function ApplyDrawer({
                         </p>
                       </div>
 
-                      <div>
-                        <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-2">
-                          <Link2 className="w-3.5 h-3.5" />
-                          Resume URL
-                        </label>
-                        <input
-                          type="url"
-                          required
-                          value={resumeUrl}
-                          onChange={(e) => setResumeUrl(e.target.value)}
-                          placeholder="https://drive.google.com/your-resume"
-                          className={cn(
-                            "w-full px-4 py-3 rounded-xl",
-                            "bg-muted/50 border border-border",
-                            "text-sm placeholder:text-muted-foreground/50",
-                            "focus:outline-none focus:border-primary/50 focus:bg-muted",
-                            "transition-colors"
-                          )}
+                      <div className="space-y-3">
+                        {/* Uploading is the only visible path. The link field
+                            stays tucked away behind a toggle because almost
+                            everyone has a PDF and the box was just noise. */}
+                        <ResumeUploadField
+                          userId={regStatus?.userId ?? ""}
+                          variant="compact"
+                          hasResume={regStatus?.hasUploadedResume}
+                          value={{
+                            resumeKey: null,
+                            resumeFileName: regStatus?.uploadedResumeName ?? null,
+                            resumeSize: null,
+                          }}
+                          onChanged={(next) => {
+                            setRegStatus((s) =>
+                              s
+                                ? {
+                                    ...s,
+                                    hasUploadedResume: Boolean(next.resumeKey),
+                                    uploadedResumeName: next.resumeFileName,
+                                  }
+                                : s
+                            );
+                            setError(null);
+                          }}
                         />
+
+                        {showResumeLink ? (
+                          <div className="space-y-2">
+                            <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                              <Link2 className="w-3.5 h-3.5" />
+                              Resume link
+                            </label>
+                            <input
+                              type="url"
+                              required={!regStatus?.hasUploadedResume}
+                              value={resumeUrl}
+                              onChange={(e) => setResumeUrl(e.target.value)}
+                              placeholder="https://drive.google.com/your-resume"
+                              className={cn(
+                                "w-full px-4 py-3 rounded-xl",
+                                "bg-muted/50 border border-border",
+                                "text-sm placeholder:text-muted-foreground/50",
+                                "focus:outline-none focus:border-primary/50 focus:bg-muted",
+                                "transition-colors"
+                              )}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowResumeLink(false)}
+                              className="text-[11px] text-muted-foreground hover:text-foreground underline"
+                            >
+                              Use my uploaded resume instead
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowResumeLink(true)}
+                            className="text-[11px] text-muted-foreground hover:text-foreground underline"
+                          >
+                            Keep my resume somewhere else? Add a link instead
+                          </button>
+                        )}
+
+                        {regStatus?.hasUploadedResume && !resumeUrl.trim() ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            Your uploaded resume will be sent with this
+                            application.
+                          </p>
+                        ) : null}
                       </div>
 
                       <div>

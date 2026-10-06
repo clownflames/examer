@@ -54,6 +54,13 @@ export type ProfileData = {
   achievements: string[];
   // resume
   resumeUrl: string | null;
+  /**
+   * Uploaded resume. Only the KEY is exposed — the file itself is served by
+   * /api/resume/[userId], which checks that the caller owns it (or is admin).
+   */
+  resumeKey: string | null;
+  resumeFileName: string | null;
+  resumeSize: number | null;
   // meta
   isPublic: boolean;
   profileCompletion: number;
@@ -97,6 +104,8 @@ type CompletionFields = {
   githubUrl?: string | null;
   skills?: string[] | null;
   resumeUrl?: string | null;
+  /** An uploaded resume counts as having a resume, same as a pasted link. */
+  resumeKey?: string | null;
 };
 
 const COMPLETION_CHECKS: CompletionCheck[] = [
@@ -113,7 +122,7 @@ const COMPLETION_CHECKS: CompletionCheck[] = [
     isDone: (p) => !!(p.linkedinUrl || p.githubUrl),
   },
   { label: "Add at least one skill", isDone: (p) => (p.skills?.length ?? 0) > 0 },
-  { label: "Add your resume link", isDone: (p) => !!p.resumeUrl },
+  { label: "Add your resume link", isDone: (p) => !!p.resumeUrl || !!p.resumeKey },
 ];
 
 function calcCompletion(p: CompletionFields): number {
@@ -229,6 +238,9 @@ export async function getMyProfile(): Promise<ProfileData | null> {
       projects: existing?.projects ?? [],
       achievements: existing?.achievements ?? [],
       resumeUrl: existing?.resumeUrl ?? null,
+      resumeKey: existing?.resumeKey ?? null,
+      resumeFileName: existing?.resumeFileName ?? null,
+      resumeSize: existing?.resumeSize ?? null,
       isPublic: existing?.isPublic ?? true,
       profileCompletion: existing?.profileCompletion ?? 0,
       userName: session.user.name ?? "",
@@ -321,10 +333,210 @@ export async function updateMyProfile(
 
 
 // =====================================================
+// RESUME UPLOAD (private)
+// =====================================================
+
+const RESUME_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Resumes are PDFs only.
+ *
+ * The extension is checked as well as the MIME type, because browsers and
+ * operating systems disagree often enough that trusting the MIME alone lets a
+ * renamed script through.
+ */
+function resumeExtension(fileName: string, fileType: string): string | null {
+  if (fileType === "application/pdf") return "pdf";
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  return ext === "pdf" ? "pdf" : null;
+}
+
+/**
+ * Step 1 of resume upload: a presigned PUT so the browser uploads straight to
+ * R2 without the file passing through the server.
+ *
+ * Returns the object KEY, never a public URL. The key is what gets stored, and
+ * what /api/resume/[userId] reads back through an authorization check.
+ */
+export async function getResumeUploadUrl(input: {
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}): Promise<
+  | { success: true; uploadUrl: string; key: string }
+  | { success: false; error: string }
+> {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    const userId = session?.user?.id;
+    if (!userId) return { success: false, error: "Not authenticated" };
+
+    const ext = resumeExtension(input.fileName, input.fileType);
+    if (!ext) {
+      return { success: false, error: "Only PDF resumes are allowed." };
+    }
+
+    if (input.fileSize > RESUME_MAX_BYTES) {
+      return {
+        success: false,
+        error: `File too large (max ${Math.floor(RESUME_MAX_BYTES / 1024 / 1024)}MB).`,
+      };
+    }
+
+    const key = buildResumeKey(userId, input.fileName);
+    const uploadUrl = await getUploadPresignedUrl(key, `application/${ext}`);
+
+    return { success: true, uploadUrl, key };
+  } catch (error) {
+    console.error("getResumeUploadUrl error:", error);
+    return { success: false, error: "Could not prepare the upload" };
+  }
+}
+
+/**
+ * Step 2: attach the uploaded resume to the signed-in user.
+ *
+ * The key prefix is rebuilt and checked here rather than trusting the client's
+ * key, so a crafted key cannot attach somebody else's object to your profile.
+ */
+export async function saveResume(input: {
+  key: string;
+  fileName: string;
+  size: number;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    const userId = session?.user?.id;
+    if (!userId) return { success: false, error: "Not authenticated" };
+
+    if (!isOwnResumeKey(input.key, userId)) {
+      return { success: false, error: "Invalid resume key." };
+    }
+
+    /**
+     * Confirm the bytes are really a PDF.
+     *
+     * The browser-reported MIME type and the extension are both supplied by the
+     * client, so a renamed PNG passes both checks. The upload goes straight to
+     * R2, which means this is the first moment the server can see the real
+     * content — so the check happens here, before anything is written to the
+     * database, and a rejected object is deleted rather than left behind.
+     */
+    if (!(await isActuallyPdf(input.key))) {
+      void deleteR2Object(input.key).catch(() => {});
+      return {
+        success: false,
+        error: "That file is not a valid PDF.",
+      };
+    }
+
+    const [existing] = await db
+      .select()
+      .from(profile)
+      .where(eq(profile.userId, userId))
+      .limit(1);
+
+    const safeName =
+      input.fileName.replace(/[^a-zA-Z0-9._ -]/g, "_").slice(0, 120) ||
+      "resume.pdf";
+
+    const payload = {
+      resumeKey: input.key,
+      resumeFileName: safeName,
+      resumeSize: input.size,
+    };
+
+    if (existing) {
+      const previous = existing.resumeKey;
+      await db
+        .update(profile)
+        .set({
+          ...payload,
+          // An uploaded resume satisfies the same check as a pasted link, so
+          // the completion percentage has to move with it — otherwise the
+          // reminder popup would keep nagging a fully complete profile.
+          profileCompletion: calcCompletion({ ...existing, ...payload }),
+        })
+        .where(eq(profile.userId, userId));
+
+      // Best-effort cleanup of the superseded file; never blocks the save.
+      if (previous && previous !== input.key) {
+        void deleteR2Object(previous).catch(() => {});
+      }
+    } else {
+      await db.insert(profile).values({
+        id: crypto.randomUUID(),
+        userId,
+        ...payload,
+        profileCompletion: calcCompletion(payload),
+      });
+    }
+
+    revalidatePath("/profile");
+    return { success: true };
+  } catch (error) {
+    console.error("saveResume error:", error);
+    return { success: false, error: "Could not save your resume" };
+  }
+}
+
+/** Removes the stored resume and its object. */
+export async function clearResume(): Promise<
+  { success: true } | { success: false; error: string }
+> {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    const userId = session?.user?.id;
+    if (!userId) return { success: false, error: "Not authenticated" };
+
+    const [existing] = await db
+      .select()
+      .from(profile)
+      .where(eq(profile.userId, userId))
+      .limit(1);
+
+    const cleared = {
+      resumeKey: null,
+      resumeFileName: null,
+      resumeSize: null,
+    };
+
+    if (existing) {
+      await db
+        .update(profile)
+        .set({
+          ...cleared,
+          // Completion has to drop too, or the profile would still read 100%
+          // with no resume attached.
+          profileCompletion: calcCompletion({ ...existing, ...cleared }),
+        })
+        .where(eq(profile.userId, userId));
+    }
+
+    if (existing?.resumeKey) {
+      void deleteR2Object(existing.resumeKey).catch(() => {});
+    }
+
+    revalidatePath("/profile");
+    return { success: true };
+  } catch (error) {
+    console.error("clearResume error:", error);
+    return { success: false, error: "Could not remove your resume" };
+  }
+}
+
+// =====================================================
 // R2 SETUP
 // =====================================================
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import {
+  buildResumeKey,
+  deleteR2Object,
+  getUploadPresignedUrl,
+  isActuallyPdf,
+} from "@/lib/r2";
+import { isOwnResumeKey } from "@/lib/auth-helpers";
 
 const R2 = new S3Client({
   region: "auto",
