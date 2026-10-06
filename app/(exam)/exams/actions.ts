@@ -16,6 +16,8 @@ import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
+import { CACHE_TAGS, invalidateTag } from '@/lib/cache'
+import { LIMITS, rateLimit } from '@/lib/rate-limit'
 import { buildAudioKey, getPublicUrl, getUploadPresignedUrl as getR2UploadUrl } from '@/lib/r2'
 
 import type {
@@ -302,6 +304,15 @@ export async function submitExam(
   examId: string,
   rawAnswers: Answers | null | undefined
 ): Promise<SubmitExamResult> {
+  // Stops a scripted client from hammering submit and writing rows.
+  const submitLimit = await rateLimit(LIMITS.examSubmit)
+  if (!submitLimit.ok) {
+    return {
+      success: false,
+      error: 'Too many submission attempts. Please wait a moment.',
+    }
+  }
+
   const userId = await currentUserId()
   if (!userId) return { success: false, error: 'Not authenticated' }
   if (!examId) return { success: false, error: 'Invalid exam' }
@@ -514,6 +525,10 @@ export async function submitExam(
 
     revalidatePath('/')
     revalidatePath('/internships')
+
+    // A new score changes the tier list and the public counters.
+    await invalidateTag(CACHE_TAGS.tierlist)
+    await invalidateTag(CACHE_TAGS.stats)
 
     return {
       success: true,

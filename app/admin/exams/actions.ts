@@ -7,6 +7,8 @@ import { asc, count, desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { exams, examQuestions, internships } from '@/db/schema'
 import { auth } from '@/lib/auth'
+import { LIMITS, rateLimit } from '@/lib/rate-limit'
+import { CACHE_TAGS, invalidateTag } from '@/lib/cache'
 import {
   PAGE_SIZE,
   examFormSchema,
@@ -358,6 +360,20 @@ export async function notifyExamStudents(
 ): Promise<NotifyResult> {
   try {
     await requireAdmin()
+
+    /**
+     * Sending is synchronous and costs real money, so it must not be
+     * double-triggered by a double-click or a retried request.
+     */
+    const notifyLimit = await rateLimit(LIMITS.examNotify)
+    if (!notifyLimit.ok) {
+      return {
+        success: false,
+        error: `Too many notification attempts. Wait about ${
+          notifyLimit.retryAfterSeconds ?? 60
+        } seconds before retrying.`,
+      }
+    }
 
     const [row] = await db
       .select({

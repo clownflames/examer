@@ -18,6 +18,9 @@ import { eq, desc, asc, sql, and, inArray, isNotNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
+import { CACHE_TAGS, cachedValue, invalidateTag } from "@/lib/cache";
+import { LIMITS, rateLimit } from "@/lib/rate-limit";
 import { getRazorpay, getRazorpayPublicKeyId } from "@/lib/razorpay";
 
 // =====================================================
@@ -138,31 +141,42 @@ export type HomeStats = {
   internships: number;
 };
 
+/**
+ * Four COUNT queries on every homepage load, for numbers that barely move.
+ * Cached for 5 minutes — long enough to absorb traffic spikes, short enough
+ * that the figures never look meaningfully stale.
+ */
 export async function getHomeStats(): Promise<HomeStats> {
   try {
-    const [students] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(user);
+    return await cachedValue(
+      "home:stats",
+      { ttlSeconds: 300, tag: CACHE_TAGS.stats },
+      async () => {
+        const [students] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(user);
 
-    const [teams] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(team);
+        const [teams] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(team);
 
-    const [demands] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(employeeDemand);
+        const [demands] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(employeeDemand);
 
-    const [internshipsCount] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(internships)
-      .where(eq(internships.isPublic, true));
+        const [internshipsCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(internships)
+          .where(eq(internships.isPublic, true));
 
-    return {
-      students: students?.count ?? 0,
-      teams: teams?.count ?? 0,
-      demands: demands?.count ?? 0,
-      internships: internshipsCount?.count ?? 0,
-    };
+        return {
+          students: students?.count ?? 0,
+          teams: teams?.count ?? 0,
+          demands: demands?.count ?? 0,
+          internships: internshipsCount?.count ?? 0,
+        };
+      }
+    );
   } catch (error) {
     console.error("getHomeStats error:", error);
     return { students: 0, teams: 0, demands: 0, internships: 0 };
@@ -185,32 +199,42 @@ export type DemandCard = {
 
 export async function getFeaturedDemands(): Promise<DemandCard[]> {
   try {
-    const demands = await db
-      .select({
-        id: employeeDemand.id,
-        name: employeeDemand.name,
-        iconUrl: employeeDemand.iconUrl,
-        description: employeeDemand.description,
-        keyFeatures: employeeDemand.keyFeatures,
-        internshipCount: sql<number>`(
-          SELECT COUNT(*)::int FROM ${internships}
-          WHERE ${internships.demandId} = ${employeeDemand.id}
-            AND ${internships.isPublic} = true
-        )`,
-      })
-      .from(employeeDemand)
-      .limit(8);
+    // Public and identical for everyone, so it is safe to cache. Keyed by the
+    // demand filter so a narrowed view does not get another view's data.
+    const raw = await cachedValue(
+      "home:featured-demands",
+      { ttlSeconds: 300, tag: CACHE_TAGS.demands },
+      async () => {
+        const demands = await db
+          .select({
+            id: employeeDemand.id,
+            name: employeeDemand.name,
+            iconUrl: employeeDemand.iconUrl,
+            description: employeeDemand.description,
+            keyFeatures: employeeDemand.keyFeatures,
+            internshipCount: sql<number>`(
+              SELECT COUNT(*)::int FROM ${internships}
+              WHERE ${internships.demandId} = ${employeeDemand.id}
+                AND ${internships.isPublic} = true
+            )`,
+          })
+          .from(employeeDemand)
+          .limit(8);
 
-    return demands.map((d) => ({
-      id: d.id,
-      name: d.name,
-      iconUrl: d.iconUrl,
-      description: d.description,
-      keyFeatures: Array.isArray(d.keyFeatures)
-        ? (d.keyFeatures as string[])
-        : [],
-      internshipCount: d.internshipCount ?? 0,
-    }));
+        return demands.map((d) => ({
+          id: d.id,
+          name: d.name,
+          iconUrl: d.iconUrl,
+          description: d.description,
+          keyFeatures: Array.isArray(d.keyFeatures)
+            ? (d.keyFeatures as string[])
+            : [],
+          internshipCount: d.internshipCount ?? 0,
+        }));
+      }
+    );
+
+    return raw;
   } catch (error) {
     console.error("getFeaturedDemands error:", error);
     return [];
@@ -233,34 +257,59 @@ export type UpcomingInternship = {
 
 export async function getUpcomingDeadlines(): Promise<UpcomingInternship[]> {
   try {
-    const rows = await db
-      .select({
-        id: internships.id,
-        name: internships.name,
-        description: internships.description,
-        lastSubmissionDate: internships.lastSubmissionDate,
-        sellingPrice: internships.sellingPrice,
-        demandName: employeeDemand.name,
-        demandIconUrl: employeeDemand.iconUrl,
-      })
-      .from(internships)
-      .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id))
-      .where(
-        and(
-          eq(internships.isPublic, true),
-          sql`${internships.lastSubmissionDate} > NOW()`
-        )
-      )
-      .orderBy(internships.lastSubmissionDate)
-      .limit(6);
+    /**
+     * Cached as ISO strings because JSON has no Date type, then revived.
+     *
+     * `daysLeft` is deliberately NOT cached — it counts down, so it has to be
+     * recomputed on every render or a deadline would sit frozen at its cached
+     * value until the TTL expired.
+     */
+    const raw = await cachedValue(
+      "home:upcoming-deadlines",
+      { ttlSeconds: 120, tag: CACHE_TAGS.deadlines },
+      async () => {
+        const rows = await db
+          .select({
+            id: internships.id,
+            name: internships.name,
+            description: internships.description,
+            lastSubmissionDate: internships.lastSubmissionDate,
+            sellingPrice: internships.sellingPrice,
+            demandName: employeeDemand.name,
+            demandIconUrl: employeeDemand.iconUrl,
+          })
+          .from(internships)
+          .leftJoin(employeeDemand, eq(internships.demandId, employeeDemand.id))
+          .where(
+            and(
+              eq(internships.isPublic, true),
+              sql`${internships.lastSubmissionDate} > NOW()`
+            )
+          )
+          .orderBy(internships.lastSubmissionDate)
+          .limit(6);
+
+        return rows.map((r) => ({
+          ...r,
+          lastSubmissionDate: r.lastSubmissionDate
+            ? r.lastSubmissionDate.toISOString()
+            : null,
+        }));
+      }
+    );
 
     const now = Date.now();
-    return rows.map((r) => ({
+    return raw.map((r) => ({
       ...r,
+      lastSubmissionDate: r.lastSubmissionDate
+        ? new Date(r.lastSubmissionDate)
+        : null,
       daysLeft: r.lastSubmissionDate
         ? Math.max(
             0,
-            Math.ceil((+new Date(r.lastSubmissionDate) - now) / (1000 * 60 * 60 * 24))
+            Math.ceil(
+              (+new Date(r.lastSubmissionDate) - now) / (1000 * 60 * 60 * 24)
+            )
           )
         : 0,
     }));
@@ -419,58 +468,72 @@ async function getScoreBuckets(): Promise<Map<string, ScoreBucket>> {
 /** Everyone on the tier list, highest running total first. */
 export async function getUserTierList(): Promise<TierUser[]> {
   try {
-    const [users, buckets] = await Promise.all([
-      db
-        .select({
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          image: user.image,
-          headline: profile.headline,
-        })
-        .from(user)
-        .leftJoin(profile, eq(profile.userId, user.id))
-        .where(eq(user.role, "user")),
-      getScoreBuckets(),
-    ]);
+    /**
+     * The whole leaderboard is identical for every visitor, so it is safe to
+     * cache — and this is the heaviest read in the app (4 queries, run on
+     * every page load by the profile reminder).
+     *
+     * Kept to 30 seconds. A leaderboard that lags half a minute after an exam
+     * is fine; one that lags an hour would look broken.
+     */
+    return await cachedValue(
+      "tierlist:users",
+      { ttlSeconds: 30, tag: CACHE_TAGS.tierlist },
+      async () => {
+        const [users, buckets] = await Promise.all([
+          db
+            .select({
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              image: user.image,
+              headline: profile.headline,
+            })
+            .from(user)
+            .leftJoin(profile, eq(profile.userId, user.id))
+            .where(eq(user.role, "user")),
+          getScoreBuckets(),
+        ]);
 
-    const rows: TierUser[] = users.map((account) => {
-      const bucket = buckets.get(account.id) ?? emptyBucket();
-      const percentage = bucketPercentage(bucket);
-      return {
-        id: account.id,
-        name: account.name,
-        email: account.email,
-        image: account.image,
-        headline: account.headline,
-        rank: 0,
-        tier: getTierFromScore(percentage),
-        totalScore: bucket.teamScore + bucket.examScore,
-        teamScore: bucket.teamScore,
-        examScore: bucket.examScore,
-        percentage: Math.round(percentage * 10) / 10,
-        teamCount: bucket.teamCount,
-        examCount: bucket.examCount,
-      };
-    });
+        const rows: TierUser[] = users.map((account) => {
+          const bucket = buckets.get(account.id) ?? emptyBucket();
+          const percentage = bucketPercentage(bucket);
+          return {
+            id: account.id,
+            name: account.name,
+            email: account.email,
+            image: account.image,
+            headline: account.headline,
+            rank: 0,
+            tier: getTierFromScore(percentage),
+            totalScore: bucket.teamScore + bucket.examScore,
+            teamScore: bucket.teamScore,
+            examScore: bucket.examScore,
+            percentage: Math.round(percentage * 10) / 10,
+            teamCount: bucket.teamCount,
+            examCount: bucket.examCount,
+          };
+        });
 
-    rows.sort(
-      (a, b) =>
-        b.totalScore - a.totalScore ||
-        b.percentage - a.percentage ||
-        a.name.localeCompare(b.name)
-    );
+        rows.sort(
+          (a, b) =>
+            b.totalScore - a.totalScore ||
+            b.percentage - a.percentage ||
+            a.name.localeCompare(b.name)
+        );
 
-    // Equal totals share a rank.
-    let lastScore = Number.NaN;
-    let lastRank = 0;
-    return rows.map((row, i) => {
-      if (row.totalScore !== lastScore) {
-        lastRank = i + 1;
-        lastScore = row.totalScore;
+        // Equal totals share a rank.
+        let lastScore = Number.NaN;
+        let lastRank = 0;
+        return rows.map((row, i) => {
+          if (row.totalScore !== lastScore) {
+            lastRank = i + 1;
+            lastScore = row.totalScore;
+          }
+          return { ...row, rank: lastRank };
+        });
       }
-      return { ...row, rank: lastRank };
-    });
+    );
   } catch (error) {
     console.error("getUserTierList error:", error);
     return [];
@@ -1000,7 +1063,8 @@ export type CreateOrderResult =
         | "invalid"
         | "closed"
         | "already_paid"
-        | "validation";
+        | "validation"
+        | "rate_limited";
     };
 
 export async function createRegistrationAndOrder(
@@ -1008,6 +1072,18 @@ export async function createRegistrationAndOrder(
   coverLetter: string,
   resumeUrl: string
 ): Promise<CreateOrderResult> {
+  // Stops someone from spamming Razorpay with order requests. Keyed on the
+  // signed-in user, not the IP, so a shared network cannot lock anyone out.
+  const registrationLimit = await rateLimit(LIMITS.registration);
+  if (!registrationLimit.ok) {
+    return {
+      success: false,
+      error:
+        "Too many attempts from your account. Please try again in a few minutes.",
+      code: "rate_limited",
+    };
+  }
+
   const userId = await currentUserId();
   if (!userId) {
     return {
@@ -1239,6 +1315,15 @@ export async function verifyPayment(params: {
   razorpayPaymentId: string;
   razorpaySignature: string;
 }): Promise<VerifyResult> {
+  // Cheap to call, easy to hammer, and it touches Razorpay — so it gets a cap.
+  const paymentLimit = await rateLimit(LIMITS.payment);
+  if (!paymentLimit.ok) {
+    return {
+      success: false,
+      error: "Too many verification attempts. Please wait a moment.",
+    };
+  }
+
   const userId = await currentUserId();
   if (!userId) return { success: false, error: "Not authenticated" };
 

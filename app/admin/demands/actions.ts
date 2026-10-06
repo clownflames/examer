@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { count, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/db'
+import { CACHE_TAGS, invalidateTag } from '@/lib/cache'
 import { employeeDemand, internships, team } from '@/db/schema'
 import {
   PAGE_SIZE,
@@ -116,6 +117,9 @@ export async function createDemand(input: DemandInput) {
       .returning({ id: employeeDemand.id })
 
     revalidatePath('/admin/demands')
+    // The homepage shows featured demands with their internship counts.
+    await invalidateTag(CACHE_TAGS.demands)
+    await invalidateTag(CACHE_TAGS.stats)
     return { success: true as const, id: created[0].id }
   } catch (err) {
     console.error('createDemand failed:', err)
@@ -142,6 +146,8 @@ export async function updateDemand(id: string, input: DemandInput) {
     }
 
     revalidatePath('/admin/demands')
+    await invalidateTag(CACHE_TAGS.demands)
+    await invalidateTag(CACHE_TAGS.stats)
     return { success: true as const }
   } catch (err) {
     console.error('updateDemand failed:', err)
@@ -163,6 +169,8 @@ export async function deleteDemand(id: string) {
     }
 
     revalidatePath('/admin/demands')
+    await invalidateTag(CACHE_TAGS.demands)
+    await invalidateTag(CACHE_TAGS.stats)
     return { success: true as const }
   } catch (err) {
     console.error('deleteDemand failed:', err)

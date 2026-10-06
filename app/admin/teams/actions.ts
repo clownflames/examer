@@ -12,6 +12,7 @@ import {
 } from 'drizzle-orm'
 
 import { db } from '@/db'
+import { CACHE_TAGS, invalidateTag } from '@/lib/cache'
 import {
   team,
   teamMember,
@@ -116,6 +117,10 @@ export async function updateTeamScore(input: {
     }
 
     revalidatePath('/admin/teams')
+
+    // Every member's rank depends on this score.
+    await invalidateTag(CACHE_TAGS.tierlist)
+
     return { success: true as const }
   } catch (err) {
     console.error('updateTeamScore failed:', err)

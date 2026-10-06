@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { count, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '@/db'
+import { CACHE_TAGS, invalidateTag } from '@/lib/cache'
 import {
   internships,
   internshipRegistration,
@@ -245,6 +246,11 @@ export async function toggleInternshipVisibility(
     // user side bhi refresh ho jaye
     revalidatePath('/')
     revalidatePath('/internships')
+
+    await invalidateTag(CACHE_TAGS.internships)
+    await invalidateTag(CACHE_TAGS.demands)
+    await invalidateTag(CACHE_TAGS.deadlines)
+    await invalidateTag(CACHE_TAGS.stats)
 
     return { success: true as const, isPublic: updated[0].isPublic }
   } catch (err) {
