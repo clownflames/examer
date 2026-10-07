@@ -56,6 +56,26 @@ const formSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal('')),
+  // Mirrors the server rule: http(s) only. zod's own .url() would also accept
+  // `javascript:` / `data:` URLs, which is not something to put in an href.
+  whatsappGroupLink: z
+    .string()
+    .max(500)
+    .refine(
+      (v) => {
+        if (!v) return true
+        try {
+          const { protocol } = new URL(v)
+          return protocol === 'https:' || protocol === 'http:'
+        } catch {
+          return false
+        }
+      },
+      'Enter a valid http(s) WhatsApp link.'
+    )
+    .optional()
+    .nullable()
+    .or(z.literal('')),
   totalScore: z.coerce.number().int().positive().default(100),
 })
 
@@ -93,6 +113,7 @@ export function InternshipForm({
     sellingPrice: string | null
     examinerName: string | null
     examinerPhotoUrl: string | null
+    whatsappGroupLink: string | null
     totalScore: number
   }
 }) {
@@ -115,6 +136,7 @@ export function InternshipForm({
         : undefined,
       examinerName: initial?.examinerName ?? '',
       examinerPhotoUrl: initial?.examinerPhotoUrl ?? '',
+      whatsappGroupLink: initial?.whatsappGroupLink ?? '',
       totalScore: initial?.totalScore ?? 100,
     },
   })
@@ -136,6 +158,7 @@ export function InternshipForm({
         sellingPrice: values.sellingPrice ?? null,
         examinerName: emptyToNull(values.examinerName),
         examinerPhotoUrl: emptyToNull(values.examinerPhotoUrl),
+        whatsappGroupLink: emptyToNull(values.whatsappGroupLink),
         totalScore: values.totalScore,
       }
 
@@ -353,9 +376,36 @@ export function InternshipForm({
               <Input
                 {...field}
                 id="jdUrl"
-                placeholder="https://”¦"
+                placeholder="https://…"
                 value={field.value ?? ''}
               />
+              {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+            </Field>
+          )}
+        />
+
+        {/* WhatsApp group link */}
+        <Controller
+          name="whatsappGroupLink"
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={fieldState.invalid}>
+              <FieldLabel htmlFor="whatsappGroupLink">
+                WhatsApp Group Link
+              </FieldLabel>
+              <Input
+                {...field}
+                id="whatsappGroupLink"
+                type="url"
+                inputMode="url"
+                placeholder="https://chat.whatsapp.com/…"
+                value={field.value ?? ''}
+              />
+              <FieldDescription>
+                Optional. Paste the invite link for this internship&apos;s
+                WhatsApp group. Only students who register for this internship
+                will see a join button — leave empty and nobody sees it.
+              </FieldDescription>
               {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
             </Field>
           )}

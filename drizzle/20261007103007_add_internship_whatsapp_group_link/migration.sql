@@ -1,0 +1,1 @@
+ALTER TABLE "internships" ADD COLUMN "whatsapp_group_link" text;

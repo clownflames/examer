@@ -154,6 +154,13 @@ export const internships = pgTable(
     examinerName: text("examiner_name"),
     examinerPhotoUrl: text("examiner_photo_url"),
 
+    /**
+     * WhatsApp invite link for this internship's cohort group. Optional — when
+     * null nobody is shown a join button. Only handed to students who have
+     * registered (paid) for the internship.
+     */
+    whatsappGroupLink: text("whatsapp_group_link"),
+
     totalScore: integer("total_score").default(100).notNull(),
 
     isPublic: boolean("is_public").default(false).notNull(),

@@ -4,6 +4,7 @@ import Navigation from "./Navigation";
 import SmoothScroll from "@/components/smooth-scroll";
 import { AnnouncementBar, getActiveAnnouncements } from "./components/announcements";
 import ProfileCompletionReminder from "./components/profile-completion-reminder";
+import PaymentReminder from "./components/payment-reminder";
 
 export const metadata: Metadata = {
   title: "InternBird",
@@ -37,6 +38,10 @@ export default async function WebsiteLayout({
       {/* Nudges signed-in students whose profile is still incomplete.
           Self-checks on mount so the layout stays statically renderable. */}
       <ProfileCompletionReminder />
+
+      {/* Same deal for money: a registered-but-unpaid application is going
+          nowhere until the payment lands, so it keeps re-asking every 30s. */}
+      <PaymentReminder />
 
       <Navigation />
     </SmoothScroll>

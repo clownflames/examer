@@ -24,6 +24,7 @@ import {
   User,
 } from "lucide-react";
 import { toast } from "sonner";
+import { FaWhatsapp } from "react-icons/fa";
 import {
   Sheet,
   SheetContent,
@@ -68,6 +69,12 @@ export type InternshipForApply = {
   totalScore: number | null;
   examinerName: string | null;
   examinerPhotoUrl: string | null;
+  /**
+   * Cohort WhatsApp invite. The server only ever sends this for a user who
+   * has registered for the internship, so a non-null value here is already
+   * the "you may see this" signal.
+   */
+  whatsappGroupLink: string | null;
 };
 
 type Props = {
@@ -572,6 +579,37 @@ export default function ApplyDrawer({
                 </div>
               </div>
             </SheetHeader>
+
+            {/* ============ WHATSAPP GROUP ============ */}
+            {/* The server only sends whatsappGroupLink to someone who has
+                registered, so its presence is the whole permission check.
+                No popup, no banner for anyone else. */}
+            {internship?.whatsappGroupLink && (
+              <a
+                href={internship.whatsappGroupLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  "mb-6 flex items-center gap-3 rounded-xl border px-4 py-3.5",
+                  "border-emerald-500/30 bg-emerald-500/5",
+                  "transition-colors hover:bg-emerald-500/10"
+                )}
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                  <FaWhatsapp className="h-5 w-5 text-emerald-500" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold">
+                    Join the WhatsApp group
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    Announcements, reminders and exam updates for this
+                    internship
+                  </span>
+                </span>
+                <ExternalLink className="h-4 w-4 shrink-0 text-emerald-500" />
+              </a>
+            )}
 
             {/* ============ LOADING ============ */}
             {phase === "loading" ? (

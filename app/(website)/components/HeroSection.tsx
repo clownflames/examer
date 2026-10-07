@@ -280,6 +280,7 @@ export default function HeroSection() {
                 totalScore: selected.totalScore,
                 examinerName: selected.examinerName,
                 examinerPhotoUrl: selected.examinerPhotoUrl,
+                whatsappGroupLink: selected.whatsappGroupLink,
               }
             : null
         }

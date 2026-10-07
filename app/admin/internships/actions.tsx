@@ -109,6 +109,7 @@ export async function getInternshipById(
       sellingPrice: internships.sellingPrice,
       examinerName: internships.examinerName,
       examinerPhotoUrl: internships.examinerPhotoUrl,
+      whatsappGroupLink: internships.whatsappGroupLink,
       totalScore: internships.totalScore,
       isPublic: internships.isPublic,
       createdAt: internships.createdAt,
@@ -125,22 +126,11 @@ export async function getInternshipById(
 /*  Create / Update / Delete                                                   */
 /* -------------------------------------------------------------------------- */
 
-const internshipSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters.').max(120),
-  demandId: z.string().min(1, 'Please select a demand.'),
-  description: z.string().max(2000).optional().nullable(),
-  lastSubmissionDate: z.coerce.date().optional().nullable(),
-  startDate: z.coerce.date().optional().nullable(),
-  endDate: z.coerce.date().optional().nullable(),
-  jdUrl: z.string().url().optional().nullable().or(z.literal('')),
-  price: z.coerce.number().nonnegative().optional().nullable(),
-  sellingPrice: z.coerce.number().nonnegative().optional().nullable(),
-  examinerName: z.string().max(120).optional().nullable(),
-  examinerPhotoUrl: z.string().url().optional().nullable().or(z.literal('')),
-  totalScore: z.coerce.number().int().positive().default(100),
-})
-
-type InternshipInput = z.infer<typeof internshipSchema>
+/**
+ * Shared with the form — `internshipFormSchema` in ./constants. A second copy
+ * here used to drift silently out of sync with the field list.
+ */
+type InternshipInput = z.infer<typeof internshipFormSchema>
 
 function normalize(input: InternshipInput) {
   return {
@@ -156,6 +146,7 @@ function normalize(input: InternshipInput) {
       input.sellingPrice != null ? String(input.sellingPrice) : null,
     examinerName: input.examinerName || null,
     examinerPhotoUrl: input.examinerPhotoUrl || null,
+    whatsappGroupLink: input.whatsappGroupLink || null,
     totalScore: input.totalScore,
   }
 }

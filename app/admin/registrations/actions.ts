@@ -10,6 +10,7 @@ import {
   internships,
   exams,
   examSubmission,
+  payments,
   user,
 } from '@/db/schema'
 import {
@@ -49,6 +50,48 @@ export async function getRegistrations(page = 1): Promise<{
       and ${examSubmission.submittedAt} is not null
   )`
 
+  /**
+   * Whether this registration was ever paid for, and how hard the student
+   * tried. `paid` wins over everything — a student who paid once stays "paid"
+   * even if a later retry failed, which mirrors how the student-facing code
+   * treats a payment as settled.
+   *
+   * Each of these is a scalar subquery in the SELECT list, and Postgres allows
+   * those to return exactly one column — so the pieces are packed into a
+   * single json object rather than selected side by side.
+   */
+  const paidPaymentSubquery = sql<{
+    amount: string | null
+    paid_at: string | null
+  } | null>`(
+    select case when count(*) = 0 then null else json_build_object(
+      'amount', (array_agg(${payments.amount} order by ${payments.paidAt} desc))[1],
+      'paid_at', (array_agg(${payments.paidAt} order by ${payments.paidAt} desc))[1]
+    ) end
+    from ${payments}
+    where ${payments.registrationId} = ${internshipRegistration.id}
+      and ${payments.status} = 'paid'
+  )`
+
+  const latestPaymentSubquery = sql<{
+    status: string | null
+    amount: string | null
+    failure_reason: string | null
+  }>`(
+    select json_build_object(
+      'status', (array_agg(${payments.status} order by ${payments.createdAt} desc))[1],
+      'amount', (array_agg(${payments.amount} order by ${payments.createdAt} desc))[1],
+      'failure_reason', (array_agg(${payments.failureReason} order by ${payments.createdAt} desc))[1]
+    )
+    from ${payments}
+    where ${payments.registrationId} = ${internshipRegistration.id}
+  )`
+
+  const attemptsSubquery = sql<number>`(
+    select count(*)::int from ${payments}
+    where ${payments.registrationId} = ${internshipRegistration.id}
+  )`
+
   const rows = await db
     .select({
       id: internshipRegistration.id,
@@ -61,6 +104,9 @@ export async function getRegistrations(page = 1): Promise<{
       createdAt: internshipRegistration.createdAt,
       examsCompleted: examsCompletedSubquery.as('exams_completed'),
       examsTotal: examsTotalSubquery.as('exams_total'),
+      paidAmount: paidPaymentSubquery.as('paid_payment'),
+      latestPayment: latestPaymentSubquery.as('latest_payment'),
+      paymentAttempts: attemptsSubquery.as('payment_attempts'),
     })
     .from(internshipRegistration)
     .innerJoin(user, eq(internshipRegistration.userId, user.id))
@@ -80,18 +126,49 @@ export async function getRegistrations(page = 1): Promise<{
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return {
-    data: rows.map((r) => ({
-      id: r.id,
-      userId: r.userId,
-      studentName: r.studentName,
-      studentEmail: r.studentEmail,
-      internshipId: r.internshipId,
-      internshipName: r.internshipName,
-      gainScore: Number(r.gainScore ?? 0),
-      createdAt: r.createdAt,
-      examsCompleted: Number(r.examsCompleted ?? 0),
-      examsTotal: Number(r.examsTotal ?? 0),
-    })),
+    data: rows.map((r) => {
+      // json_build_object gives back plain JSON, so paid_at arrives as an ISO
+      // string rather than a Date.
+      const paid = r.paidAmount as {
+        amount: string | null
+        paid_at: string | null
+      } | null
+      // The paid subquery is explicitly nulled when there is no paid row —
+      // json_build_object on an empty set would otherwise still return an
+      // all-null object, which would read as truthy here.
+      const latest = r.latestPayment as
+        | { status: string | null; amount: string | null; failure_reason: string | null }
+        | null
+
+      // A settled payment always wins. Otherwise report whatever the newest
+      // attempt says, and "unpaid" when they never started one at all.
+      const paymentStatus = paid
+        ? 'paid'
+        : latest?.status === 'pending'
+          ? 'pending'
+          : latest?.status === 'failed'
+            ? 'failed'
+            : 'unpaid'
+
+      return {
+        id: r.id,
+        userId: r.userId,
+        studentName: r.studentName,
+        studentEmail: r.studentEmail,
+        internshipId: r.internshipId,
+        internshipName: r.internshipName,
+        gainScore: Number(r.gainScore ?? 0),
+        createdAt: r.createdAt,
+        examsCompleted: Number(r.examsCompleted ?? 0),
+        examsTotal: Number(r.examsTotal ?? 0),
+        paymentStatus: paymentStatus as RegistrationRow['paymentStatus'],
+        paidAt: paid?.paid_at ? new Date(paid.paid_at) : null,
+        amountPaid: paid?.amount ?? null,
+        failureReason:
+          paymentStatus === 'paid' ? null : (latest?.failure_reason ?? null),
+        paymentAttempts: Number(r.paymentAttempts ?? 0),
+      }
+    }),
     page: safePage,
     totalPages,
     total,

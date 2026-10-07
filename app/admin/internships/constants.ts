@@ -12,6 +12,32 @@ export const internshipFormSchema = z.object({
   startDate: z.coerce.date().optional().nullable(),
   endDate: z.coerce.date().optional().nullable(),
   jdUrl: z.string().url().optional().nullable().or(z.literal('')),
+  /**
+   * Optional cohort WhatsApp invite.
+   *
+   * `z.string().url()` alone is not enough here: zod v4 accepts any parseable
+   * scheme, so `javascript:alert(1)` and `data:text/html,…` both pass. This
+   * value is rendered straight into an `<a href>` on the student side, so the
+   * scheme is pinned to http(s) or an empty string (= "no link").
+   */
+  whatsappGroupLink: z
+    .string()
+    .max(500)
+    .refine(
+      (v) => {
+        if (v === '') return true
+        try {
+          const { protocol } = new URL(v)
+          return protocol === 'https:' || protocol === 'http:'
+        } catch {
+          return false
+        }
+      },
+      { message: 'Enter a valid http(s) WhatsApp link.' }
+    )
+    .optional()
+    .nullable()
+    .or(z.literal('')),
   price: z.coerce.number().nonnegative().optional().nullable(),
   sellingPrice: z.coerce.number().nonnegative().optional().nullable(),
   examinerName: z.string().max(120).optional().nullable(),
@@ -53,6 +79,7 @@ export type InternshipDetail = {
   sellingPrice: string | null
   examinerName: string | null
   examinerPhotoUrl: string | null
+  whatsappGroupLink: string | null
   totalScore: number
   isPublic: boolean
   createdAt: Date

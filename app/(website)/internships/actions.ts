@@ -26,6 +26,11 @@ export type InternshipCard = {
   totalScore: number;
   examinerName: string | null;
   examinerPhotoUrl: string | null;
+  /**
+   * Invite link for this internship's WhatsApp group. Only sent to the client
+   * for someone who has already registered — see getAllInternships.
+   */
+  whatsappGroupLink: string | null;
   createdAt: Date;
   demandId: string;
   demandName: string | null;
@@ -100,6 +105,7 @@ export async function getAllInternships(params?: {
         totalScore: internships.totalScore,
         examinerName: internships.examinerName,
         examinerPhotoUrl: internships.examinerPhotoUrl,
+        whatsappGroupLink: internships.whatsappGroupLink,
         createdAt: internships.createdAt,
         demandId: internships.demandId,
         demandName: employeeDemand.name,
@@ -138,6 +144,10 @@ export async function getAllInternships(params?: {
       totalScore: r.totalScore,
       examinerName: r.examinerName,
       examinerPhotoUrl: r.examinerPhotoUrl,
+      // Cohort group invite is scoped to people who actually joined this
+      // internship. Never ship the raw link to anonymous visitors — otherwise
+      // the client bundle leaks it before anyone registers.
+      whatsappGroupLink: paidIds.has(r.id) ? r.whatsappGroupLink : null,
       createdAt: r.createdAt,
       demandId: r.demandId,
       demandName: r.demandName,

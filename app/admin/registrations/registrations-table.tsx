@@ -2,7 +2,17 @@
 
 import * as React from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { Check, Pencil, Plus, Trash2, X } from 'lucide-react'
+import {
+  Check,
+  CheckCircle2,
+  CircleDashed,
+  Clock,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+  XCircle,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 
@@ -123,6 +133,7 @@ export function RegistrationsTable({
               <TableHead className="w-[100px]">ID</TableHead>
               <TableHead>Student</TableHead>
               <TableHead>Internship</TableHead>
+              <TableHead className="w-[140px]">Payment</TableHead>
               <TableHead className="w-[140px]">Gain Score</TableHead>
               <TableHead>Exams</TableHead>
               <TableHead>Registered</TableHead>
@@ -133,7 +144,7 @@ export function RegistrationsTable({
             {data.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-muted-foreground h-24 text-center"
                 >
                   No registrations found. Click{' '}
@@ -156,6 +167,9 @@ export function RegistrationsTable({
                   </TableCell>
                   <TableCell className="font-medium">
                     {row.internshipName}
+                  </TableCell>
+                  <TableCell>
+                    <PaymentStatusBadge row={row} />
                   </TableCell>
                   <TableCell>
                     <EditableScore
@@ -261,6 +275,69 @@ function getPageNumbers(current: number, total: number): (number | '…')[] {
   if (end < total - 1) pages.push('…')
   pages.push(total)
   return pages
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Payment status                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Whether this student actually paid. Paid wins outright; the other three all
+ * mean "they owe money" but differ in why, which is what the admin needs to
+ * see before deciding whether to chase them.
+ */
+function PaymentStatusBadge({ row }: { row: RegistrationRow }) {
+  const retry =
+    row.paymentStatus !== 'paid' && row.paymentAttempts > 1
+      ? ` · ${row.paymentAttempts} attempts`
+      : ''
+
+  if (row.paymentStatus === 'paid') {
+    return (
+      <Badge className="bg-green-600 text-white hover:bg-green-700 gap-1">
+        <CheckCircle2 className="h-3 w-3" />
+        Paid
+        {row.amountPaid ? ` · ₹${row.amountPaid}` : ''}
+      </Badge>
+    )
+  }
+
+  if (row.paymentStatus === 'pending') {
+    return (
+      <Badge
+        variant="secondary"
+        className="gap-1"
+        title="Razorpay order created — payment not confirmed yet"
+      >
+        <Clock className="h-3 w-3" />
+        Pending{retry}
+      </Badge>
+    )
+  }
+
+  if (row.paymentStatus === 'failed') {
+    return (
+      <Badge
+        variant="destructive"
+        className="gap-1"
+        title={row.failureReason ?? 'Payment attempt failed'}
+      >
+        <XCircle className="h-3 w-3" />
+        Failed{retry}
+      </Badge>
+    )
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className="text-muted-foreground gap-1"
+      title="Registered but never started a payment"
+    >
+      <CircleDashed className="h-3 w-3" />
+      Unpaid
+    </Badge>
+  )
 }
 
 /* -------------------------------------------------------------------------- */

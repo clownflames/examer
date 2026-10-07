@@ -11,6 +11,18 @@ export type RegistrationRow = {
   examsCompleted: number
   examsTotal: number
   createdAt: Date
+  /**
+   * Latest payment attempt for this registration. `unpaid` is a synthetic
+   * status meaning no attempt at all was ever made.
+   */
+  paymentStatus: 'paid' | 'pending' | 'failed' | 'unpaid'
+  /** When the payment was captured, if it ever was. */
+  paidAt: Date | null
+  /** What the attempt was for, and why it failed. */
+  amountPaid: string | null
+  failureReason: string | null
+  /** Total attempts this student made — reveals retries at a glance. */
+  paymentAttempts: number
 }
 
 export type StudentOption = {

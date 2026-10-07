@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import { FaWhatsapp } from "react-icons/fa";
 import {
   Briefcase,
   Search,
@@ -158,7 +159,21 @@ export default function InternshipsPageClient() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [activeDemand, setActiveDemand] = useState<string | null>(null);
   const [sort, setSort] = useState<SortOption>("newest");
-  const [openId, setOpenId] = useState<string | null>(null);
+  // /internships?pay=<id> — the payment reminder sends people straight to the
+  // right internship. Read it as the initial value so there is no effect and
+  // no extra render, and strip it from the URL on mount so a refresh does not
+  // yank the drawer open again.
+  const [openId, setOpenId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("pay");
+  });
+
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has("pay")) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("pay");
+    window.history.replaceState({}, "", url);
+  }, []);
 
   useEffect(() => {
     getDemandFilters().then((res) => {
@@ -195,6 +210,13 @@ export default function InternshipsPageClient() {
   const selected = useMemo(
     () => data.find((d) => d.id === openId) ?? null,
     [data, openId]
+  );
+
+  // What this person is already in. Each entry only carries its WhatsApp link
+  // because the server resolved them as registered for it.
+  const myRegistrations = useMemo(
+    () => data.filter((d) => d.isRegistered),
+    [data]
   );
 
   return (
@@ -241,6 +263,93 @@ export default function InternshipsPageClient() {
           </motion.div>
         </div>
       </section>
+
+      {/* ============ MY REGISTRATIONS ============ */}
+      {/* Stays hidden until there is something to show, so a visitor who
+          registered for nothing never sees an empty panel. */}
+      {!loading && myRegistrations.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 md:px-8 pt-8">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-sm font-semibold tracking-tight">
+              Your internships
+            </h2>
+            <Badge
+              variant="outline"
+              className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+            >
+              {myRegistrations.length}
+            </Badge>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {myRegistrations.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setOpenId(item.id)}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border bg-card p-4 text-left",
+                  "transition-colors hover:border-primary/40"
+                )}
+              >
+                {item.demandIconUrl ? (
+                  <div className="w-10 h-10 rounded-lg border bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                    <Image
+                      src={item.demandIconUrl}
+                      alt={item.demandName ?? ""}
+                      width={24}
+                      height={24}
+                      className="object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-10 h-10 rounded-lg border bg-muted flex items-center justify-center shrink-0">
+                    <Briefcase className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate">
+                    {item.name}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Registered
+                  </p>
+                </div>
+
+                {item.whatsappGroupLink && (
+                  <span
+                    role="link"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(item.whatsappGroupLink!, "_blank", "noopener");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        window.open(
+                          item.whatsappGroupLink!,
+                          "_blank",
+                          "noopener"
+                        );
+                      }
+                    }}
+                    title="Join WhatsApp group"
+                    className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+                      "bg-emerald-500/15 transition-colors hover:bg-emerald-500/25",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    )}
+                  >
+                    <FaWhatsapp className="h-4 w-4 text-emerald-500" />
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ============ DEMAND CHIPS ============ */}
       <section className="sticky top-0 z-20 bg-background/80 backdrop-blur-xl border-b">
@@ -597,6 +706,7 @@ export default function InternshipsPageClient() {
                 totalScore: selected.totalScore,
                 examinerName: selected.examinerName,
                 examinerPhotoUrl: selected.examinerPhotoUrl,
+                whatsappGroupLink: selected.whatsappGroupLink,
               }
             : null
         }

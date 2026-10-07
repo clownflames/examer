@@ -50,6 +50,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { UserDrawerForm } from './user-drawer-form'
+import { UserDetailDrawer } from './user-detail-drawer'
 import { deleteUser } from './actions'
 import type { UserRow } from './constants'
 
@@ -79,6 +80,8 @@ export function UsersTable({
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [createOpen, setCreateOpen] = React.useState(false)
+  // Which user's detail drawer is open, if any.
+  const [detailId, setDetailId] = React.useState<string | null>(null)
 
   function goToPage(p: number) {
     const params = new URLSearchParams(searchParams.toString())
@@ -153,7 +156,11 @@ export function UsersTable({
               </TableRow>
             ) : (
               data.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  onClick={() => setDetailId(row.id)}
+                  className="cursor-pointer"
+                >
                   <TableCell className="text-muted-foreground font-mono text-xs">
                     {row.id.slice(0, 8)}
                   </TableCell>
@@ -212,11 +219,15 @@ export function UsersTable({
                     {format(new Date(row.createdAt), 'MMM d, yyyy')}
                   </TableCell>
                   <TableCell className="text-right">
-                    <DeleteUserButton
-                      id={row.id}
-                      name={row.name}
-                      isSelf={row.id === currentUserId}
-                    />
+                    {/* The whole row opens the drawer, so the button has to
+                        stop the click or deleting would also open it. */}
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <DeleteUserButton
+                        id={row.id}
+                        name={row.name}
+                        isSelf={row.id === currentUserId}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -286,6 +297,13 @@ export function UsersTable({
           </PaginationContent>
         </Pagination>
       </div>
+
+      {/* Everything for one student, loaded when a row is clicked. */}
+      <UserDetailDrawer
+        userId={detailId}
+        open={detailId !== null}
+        onClose={() => setDetailId(null)}
+      />
     </div>
   )
 }

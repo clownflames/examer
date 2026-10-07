@@ -38,6 +38,8 @@ export type InternshipListItem = {
   totalScore: number;
   examinerName: string | null;
   examinerPhotoUrl: string | null;
+  /** Only populated for a user who registered. See getInternships. */
+  whatsappGroupLink: string | null;
   demandName: string | null;
   demandIconUrl: string | null;
   isRegistered: boolean;
@@ -68,6 +70,7 @@ export async function getInternships(): Promise<InternshipListItem[]> {
         totalScore: internships.totalScore,
         examinerName: internships.examinerName,
         examinerPhotoUrl: internships.examinerPhotoUrl,
+        whatsappGroupLink: internships.whatsappGroupLink,
         demandName: employeeDemand.name,
         demandIconUrl: employeeDemand.iconUrl,
       })
@@ -79,10 +82,16 @@ export async function getInternships(): Promise<InternshipListItem[]> {
 
     const paidIds = await getPaidInternshipIds(userId);
 
-    return rows.map((r) => ({
-      ...r,
-      isRegistered: paidIds.has(r.id), // ✅ sirf paid users ko "Applied"
-    }));
+    return rows.map((r) => {
+      const isRegistered = paidIds.has(r.id); // ✅ sirf paid users ko "Applied"
+      return {
+        ...r,
+        isRegistered,
+        // Scoped to registered users only, so the invite link never reaches
+        // a visitor's browser for an internship they have not joined.
+        whatsappGroupLink: isRegistered ? r.whatsappGroupLink : null,
+      };
+    });
   } catch (error) {
     console.error("getInternships error:", error);
     return [];
@@ -537,6 +546,77 @@ export async function getUserTierList(): Promise<TierUser[]> {
     console.error("getUserTierList error:", error);
     return [];
   }
+}
+
+/**
+ * One page of the leaderboard.
+ *
+ * The ranking itself is computed once and cached by `getUserTierList`; this
+ * only slices and filters that already-cached array. That split is what keeps
+ * the page cheap: the expensive part (4 queries) is memoised server-side, and
+ * every visitor after the first gets 25 rows of JSON instead of the whole
+ * student body.
+ */
+export type TierListPage = {
+  rows: TierUser[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  tierCounts: Record<TierLevel, number>;
+};
+
+export async function getTierListPage(options: {
+  page?: number;
+  pageSize?: number;
+  tier?: TierLevel | null;
+  query?: string | null;
+}): Promise<TierListPage> {
+  // A "use server" module may only export async functions, so the page size
+  // lives here rather than as an exported constant.
+  const pageSize = options.pageSize ?? 25;
+  const query = (options.query ?? "").trim().toLowerCase();
+  const tier = options.tier ?? null;
+
+  const all = await getUserTierList();
+
+  // Tier counts describe the whole leaderboard, not the filtered slice — they
+  // are a breakdown strip, and it must not collapse to a single tier when a
+  // filter is on.
+  const tierCounts: Record<TierLevel, number> = {
+    Elite: 0,
+    Platinum: 0,
+    Gold: 0,
+    Silver: 0,
+    Bronze: 0,
+  };
+  for (const u of all) tierCounts[u.tier] += 1;
+
+  const filtered = all.filter((u) => {
+    if (tier && u.tier !== tier) return false;
+    if (!query) return true;
+    return (
+      u.name.toLowerCase().includes(query) ||
+      u.email.toLowerCase().includes(query) ||
+      (u.headline ?? "").toLowerCase().includes(query)
+    );
+  });
+
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // Clamp instead of trusting the param: a stale ?page=99 after filtering
+  // should land on the last real page, not on an empty table.
+  const page = Math.min(Math.max(1, Math.floor(options.page ?? 1) || 1), totalPages);
+  const start = (page - 1) * pageSize;
+
+  return {
+    rows: filtered.slice(start, start + pageSize),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    tierCounts,
+  };
 }
 
 export type UserTierTeam = {
@@ -1660,6 +1740,112 @@ export async function getMyRegistrationStatus(
   } catch (error) {
     console.error("getMyRegistrationStatus error:", error);
     return empty;
+  }
+}
+
+// =====================================================
+// UNPAID REGISTRATIONS — drives the "complete your payment" popup
+// =====================================================
+
+export type UnpaidRegistration = {
+  internshipId: string;
+  internshipName: string;
+  /** Latest attempt: pending, failed, or null when no order was ever made. */
+  paymentStatus: "pending" | "failed" | null;
+  failureReason: string | null;
+  amountDue: number;
+  currency: string;
+  /** True when a payment row exists in `pending` that may still be paid. */
+  hasOpenOrder: boolean;
+};
+
+/**
+ * Every internship this user has applied to but not yet paid for.
+ *
+ * A registration counts as owed while NO payment row for it is `paid`. That
+ * covers all three ways a student can end up here:
+ *   - applied, never started payment (no payment row at all)
+ *   - applied, Razorpay window still open (pending)
+ *   - applied, payment was declined or the window expired (failed)
+ *
+ * Also repairs lost callbacks first: if Razorpay actually captured the money,
+ * `reconcilePendingPayment` flips the row to paid and this disappears from the
+ * list, so the popup stops nagging the moment the payment genuinely lands.
+ *
+ * Returns [] for signed-out visitors, admins, and anyone who is fully paid.
+ */
+export async function getUnpaidRegistrations(): Promise<UnpaidRegistration[]> {
+  const userId = await currentUserId();
+  if (!userId) return [];
+
+  try {
+    const regs = await db
+      .select({
+        internshipId: internshipRegistration.internshipId,
+        internshipName: internships.name,
+        sellingPrice: internships.sellingPrice,
+        price: internships.price,
+      })
+      .from(internshipRegistration)
+      .innerJoin(
+        internships,
+        eq(internshipRegistration.internshipId, internships.id)
+      )
+      .where(eq(internshipRegistration.userId, userId));
+
+    if (regs.length === 0) return [];
+
+    const unpaid: UnpaidRegistration[] = [];
+
+    for (const reg of regs) {
+      // Self-heal before deciding: a lost browser callback may have left a
+      // captured payment looking "pending" forever.
+      await reconcilePendingPayment(userId, reg.internshipId);
+
+      const attempts = await db
+        .select({
+          status: payments.status,
+          failureReason: payments.failureReason,
+        })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.userId, userId),
+            eq(payments.internshipId, reg.internshipId)
+          )
+        )
+        .orderBy(desc(payments.createdAt));
+
+      if (attempts.some((a) => a.status === "paid")) continue;
+
+      // Free internships grant access without any payment, so there is nothing
+      // to collect and nothing to nag about.
+      const amountDue = effectiveAmountRupees(reg);
+      if (amountDue <= 0) continue;
+
+      // The newest attempt describes where they are right now.
+      const latest = attempts[0] ?? null;
+
+      unpaid.push({
+        internshipId: reg.internshipId,
+        internshipName: reg.internshipName,
+        paymentStatus:
+          latest?.status === "pending"
+            ? "pending"
+            : latest?.status === "failed"
+              ? "failed"
+              : null,
+        failureReason: latest?.failureReason ?? null,
+        amountDue,
+        currency: "INR",
+        hasOpenOrder: attempts.some((a) => a.status === "pending"),
+      });
+    }
+
+    return unpaid;
+  } catch (error) {
+    console.error("getUnpaidRegistrations error:", error);
+    return [];
   }
 }
 
