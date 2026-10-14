@@ -5,7 +5,7 @@ import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Clock, ListChecks, Target, Trophy } from 'lucide-react'
+import { ChevronDown, Clock, Copy, ListChecks, Target, Trophy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -30,7 +30,9 @@ import {
   updateExam,
   getExamById,
   getNextOrderNo,
+  getExamsForQuestionTemplate,
 } from './actions'
+import { InternshipMultiSelect } from './internship-multi-select'
 import type { ExamInput, InternshipOption } from './constants'
 
 /* -------------------------------------------------------------------------- */
@@ -67,6 +69,13 @@ function emptyToNull(v: string | null | undefined) {
   return v && v.trim() !== '' ? v : null
 }
 
+type TemplateExam = {
+  id: string
+  name: string
+  internshipName: string
+  questionCount: number
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Component                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -85,6 +94,12 @@ export function ExamDrawerForm({
   const [submitting, setSubmitting] = React.useState(false)
   const [loading, setLoading] = React.useState(mode === 'edit')
   const [notifyStudents, setNotifyStudents] = React.useState(true)
+
+  // Copy-to-other-internships (create mode only)
+  const [showCopies, setShowCopies] = React.useState(false)
+  const [alsoCreateFor, setAlsoCreateFor] = React.useState<string[]>([])
+  const [copyFrom, setCopyFrom] = React.useState('')
+  const [templates, setTemplates] = React.useState<TemplateExam[] | null>(null)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(clientSchema) as Resolver<FormValues>,
@@ -152,6 +167,25 @@ export function ExamDrawerForm({
     }
   }, [mode, selectedInternshipId, form])
 
+  // Only fetch the template list once the copy section is actually opened.
+  React.useEffect(() => {
+    if (mode !== 'create' || !showCopies || templates) return
+    let mounted = true
+
+    getExamsForQuestionTemplate()
+      .then((list) => {
+        if (mounted) setTemplates(list)
+      })
+      .catch((err) => {
+        console.error('Failed to load exam templates:', err)
+        if (mounted) setTemplates([])
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [mode, showCopies, templates])
+
   async function onSubmit(values: FormValues) {
     if (
       values.passingMarks !== '' &&
@@ -180,7 +214,13 @@ export function ExamDrawerForm({
     }
 
     if (mode === 'create') {
-      const result = await createExam({ ...payload, notifyStudents })
+      const result = await createExam(
+        { ...payload, notifyStudents },
+        {
+          alsoCreateFor: showCopies ? alsoCreateFor : [],
+          copyQuestionsFromExamId: showCopies && copyFrom ? copyFrom : undefined,
+        }
+      )
       setSubmitting(false)
 
       if (!result.success) {
@@ -188,23 +228,34 @@ export function ExamDrawerForm({
         return
       }
 
+      const copies = result.copies ?? 0
+      const copyNote =
+        copies > 0
+          ? ` and copied to ${copies} other internship${copies === 1 ? '' : 's'}` +
+            (result.questionsCopied
+              ? ` with all ${result.questionsCopied} question${result.questionsCopied === 1 ? '' : 's'}`
+              : '')
+          : ''
+
       const n = result.notified
       if (notifyStudents && n) {
         if (n.sent > 0) {
           toast.success(
-            `Exam created. ${n.sent} of ${n.recipients} students emailed.`,
+            `Exam created${copyNote}. ${n.sent} of ${n.recipients} students emailed.`,
             { description: n.message }
           )
         } else {
-          toast.warning('Exam created, but no emails were sent.', {
+          toast.warning(`Exam created${copyNote}, but no emails were sent.`, {
             description: n.message,
           })
         }
       } else {
-        toast.success('Exam created.')
+        toast.success(`Exam created${copyNote}.`)
       }
 
       form.reset()
+      setAlsoCreateFor([])
+      setCopyFrom('')
       onSuccess()
       return
     }
@@ -268,6 +319,94 @@ export function ExamDrawerForm({
             </Field>
           )}
         />
+
+        {/* Copy to other internships (create mode only) */}
+        {mode === 'create' && (
+          <div className="flex flex-col gap-3 rounded-lg border p-3">
+            <button
+              type="button"
+              onClick={() => setShowCopies((value) => !value)}
+              className="flex items-center justify-between gap-3 text-left"
+            >
+              <span className="flex flex-col gap-0.5">
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <Copy className="h-3.5 w-3.5" />
+                  Reuse this exam for other internships
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  Create identical copies in one go, optionally starting from an
+                  existing question set.
+                </span>
+              </span>
+              <ChevronDown
+                className={`text-muted-foreground h-4 w-4 shrink-0 transition-transform ${
+                  showCopies ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {showCopies && (
+              <div className="flex flex-col gap-4 border-t pt-3">
+                <Field>
+                  <FieldLabel>Also create copies for</FieldLabel>
+                  <InternshipMultiSelect
+                    options={internshipOptions}
+                    value={alsoCreateFor}
+                    onChange={setAlsoCreateFor}
+                    excludeId={selectedInternshipId}
+                    excludeLabel="main"
+                    maxHeight="max-h-40"
+                  />
+                  <FieldDescription>
+                    Every selected internship gets its own copy of this exam,
+                    editable on its own.
+                  </FieldDescription>
+                </Field>
+
+                <Field>
+                  <FieldLabel>Start from an existing question set</FieldLabel>
+                  <Select
+                    value={copyFrom}
+                    onValueChange={(value) => setCopyFrom(value ?? '')}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Start with an empty exam" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(templates ?? []).map((template) => (
+                        <SelectItem key={template.id} value={template.id}>
+                          {template.name} — {template.internshipName} (
+                          {template.questionCount})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    The main exam and every copy will be created with this
+                    exam&apos;s questions and options.
+                  </FieldDescription>
+                </Field>
+
+                {copyFrom &&
+                  templates?.find((template) => template.id === copyFrom)
+                    ?.questionCount === 0 && (
+                    <p className="text-muted-foreground text-[11px]">
+                      That exam has no questions yet, so it will be copied empty.
+                    </p>
+                  )}
+
+                {alsoCreateFor.length > 0 && (
+                  <p className="text-muted-foreground text-[11px]">
+                    Saving will create{' '}
+                    {alsoCreateFor.length + 1} exams in total. Students are only
+                    emailed for the main internship — send the rest from the
+                    Exams table once you are happy with them.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Order + Name side by side */}
         <div className="grid gap-4 sm:grid-cols-[120px_1fr]">

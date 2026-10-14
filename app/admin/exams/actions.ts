@@ -2,10 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
-import { asc, count, desc, eq, sql } from 'drizzle-orm'
+import { asc, count, desc, eq, inArray, sql } from 'drizzle-orm'
 
 import { db } from '@/db'
-import { exams, examQuestions, internships } from '@/db/schema'
+import { exams, examQuestions, internships, questionMcqs } from '@/db/schema'
 import { auth } from '@/lib/auth'
 import { LIMITS, rateLimit } from '@/lib/rate-limit'
 import {
@@ -143,7 +143,205 @@ function normalize(input: ExamInput) {
   }
 }
 
-export async function createExam(input: ExamInput & { notifyStudents?: boolean }) {
+/* -------------------------------------------------------------------------- */
+/*  Copying an exam to other internships                                       */
+/*                                                                             */
+/*  Shared by `createExam` (copies made during creation) and                  */
+/*  `copyExamToInternships` (copies made from the Exams table).                */
+/* -------------------------------------------------------------------------- */
+
+type QuestionTemplate = {
+  name: string
+  type: string
+  marks: number
+  details: string | null
+  defaultText: string | null
+  options: { labelText: string; isCorrect: boolean }[]
+}
+
+type ExamCopyRow = {
+  id: string
+  internshipId: string
+  orderNo: number
+  name: string
+  description: string | null
+  duration: number
+  totalMarks: number
+  passingMarks: number | null
+  isPublic: boolean
+}
+
+/**
+ * Read a question set in the order the student runner uses it, so a copy is
+ * indistinguishable from its source at runtime.
+ */
+async function loadQuestionTemplate(
+  examId: string
+): Promise<QuestionTemplate[]> {
+  const questions = await db
+    .select({
+      id: examQuestions.id,
+      name: examQuestions.name,
+      type: examQuestions.type,
+      marks: examQuestions.marks,
+      details: examQuestions.details,
+      defaultText: examQuestions.defaultText,
+    })
+    .from(examQuestions)
+    .where(eq(examQuestions.examId, examId))
+    .orderBy(asc(examQuestions.createdAt), asc(examQuestions.id))
+
+  if (questions.length === 0) return []
+
+  const options = await db
+    .select({
+      questionId: questionMcqs.questionId,
+      labelText: questionMcqs.labelText,
+      isCorrect: questionMcqs.isCorrect,
+    })
+    .from(questionMcqs)
+    .where(
+      inArray(
+        questionMcqs.questionId,
+        questions.map((q) => q.id)
+      )
+    )
+    // Matches the student runner's ordering.
+    .orderBy(asc(questionMcqs.labelText))
+
+  const byQuestion = new Map<string, QuestionTemplate['options']>()
+  for (const option of options) {
+    const list = byQuestion.get(option.questionId) ?? []
+    list.push({
+      labelText: option.labelText,
+      isCorrect: option.isCorrect,
+    })
+    byQuestion.set(option.questionId, list)
+  }
+
+  return questions.map((q) => ({
+    name: q.name,
+    type: q.type,
+    marks: Number(q.marks),
+    details: q.details,
+    defaultText: q.defaultText,
+    options: byQuestion.get(q.id) ?? [],
+  }))
+}
+
+/**
+ * Insert several exams that all share the same question set, in one transaction.
+ *
+ * `createdAt` is written explicitly rather than left to `defaultNow()`:
+ * Postgres' `now()` is the *transaction* timestamp, so every row would share one
+ * value and `ORDER BY created_at` would fall back to heap order. Nudging the
+ * timestamp per exam and per question keeps the original ordering intact.
+ */
+async function insertExamsWithQuestions(
+  examRows: ExamCopyRow[],
+  template: QuestionTemplate[]
+) {
+  const now = Date.now()
+
+  const examValues = examRows.map((exam, index) => ({
+    ...exam,
+    createdAt: new Date(now + index),
+  }))
+
+  const questionPairs: {
+    row: {
+      id: string
+      examId: string
+      name: string
+      type: string
+      marks: number
+      details: string | null
+      defaultText: string | null
+      createdAt: Date
+    }
+    options: QuestionTemplate['options']
+  }[] = []
+  examRows.forEach((exam, examIndex) => {
+    template.forEach((question, questionIndex) => {
+      questionPairs.push({
+        row: {
+          id: crypto.randomUUID(),
+          examId: exam.id,
+          name: question.name,
+          type: question.type,
+          marks: question.marks,
+          details: question.details,
+          defaultText: question.defaultText,
+          createdAt: new Date(now + examIndex * 100_000 + questionIndex),
+        },
+        options: question.options,
+      })
+    })
+  })
+
+  const questionValues = questionPairs.map((pair) => pair.row)
+  const optionValues = questionPairs.flatMap((pair) =>
+    pair.options
+      .filter((option) => option.labelText.trim() !== '')
+      .map((option) => ({
+        id: crypto.randomUUID(),
+        questionId: pair.row.id,
+        labelText: option.labelText,
+        isCorrect: option.isCorrect,
+      }))
+  )
+
+  await db.transaction(async (tx) => {
+    await tx.insert(exams).values(examValues)
+    if (questionValues.length > 0) {
+      await tx.insert(examQuestions).values(questionValues)
+    }
+    if (optionValues.length > 0) {
+      await tx.insert(questionMcqs).values(optionValues)
+    }
+  })
+}
+
+/** Drop unknown ids and de-duplicate, preserving the caller's order. */
+async function resolveInternshipIds(ids: string[]): Promise<string[]> {
+  const unique = [...new Set(ids.filter((id) => typeof id === 'string' && id))]
+  if (unique.length === 0) return []
+
+  const known = await db
+    .select({ id: internships.id })
+    .from(internships)
+    .where(inArray(internships.id, unique))
+  const knownIds = new Set(known.map((row) => row.id))
+  return unique.filter((id) => knownIds.has(id))
+}
+
+export type CreateExamResult =
+  | { success: false; error: string }
+  | {
+      success: true
+      id: string
+      /** How many extra exams were created for other internships. */
+      copies: number
+      /** Questions replicated onto every exam created in this call. */
+      questionsCopied: number
+      notified?: {
+        recipients: number
+        sent: number
+        failed: number
+        skipped?: boolean
+        message?: string
+      }
+    }
+
+export async function createExam(
+  input: ExamInput & { notifyStudents?: boolean },
+  extra?: {
+    /** Extra internships that should get an identical copy of this exam. */
+    alsoCreateFor?: string[]
+    /** Copy this exam's questions into every exam created in this call. */
+    copyQuestionsFromExamId?: string
+  }
+): Promise<CreateExamResult> {
   try {
     await requireAdmin()
 
@@ -159,17 +357,41 @@ export async function createExam(input: ExamInput & { notifyStudents?: boolean }
       }
     }
 
-    const created = await db
-      .insert(exams)
-      .values({
+    const template = extra?.copyQuestionsFromExamId
+      ? await loadQuestionTemplate(extra.copyQuestionsFromExamId)
+      : []
+
+    // The primary internship's own id is never a copy target.
+    const copyTargets = (
+      await resolveInternshipIds(extra?.alsoCreateFor ?? [])
+    ).filter((id) => id !== parsed.internshipId)
+
+    const primary: ExamCopyRow = {
+      id: crypto.randomUUID(),
+      ...normalize(parsed),
+      isPublic: false,
+    }
+
+    const copyRows: ExamCopyRow[] = []
+    for (const internshipId of copyTargets) {
+      copyRows.push({
+        ...primary,
         id: crypto.randomUUID(),
-        ...normalize(parsed),
+        internshipId,
+        orderNo: await getNextOrderNo(internshipId),
       })
-      .returning({ id: exams.id })
+    }
+
+    await insertExamsWithQuestions([primary, ...copyRows], template)
+
+    const id = primary.id
 
     revalidatePath('/admin/exams')
 
-    const id = created[0].id
+    const created = {
+      copies: copyRows.length,
+      questionsCopied: template.length,
+    }
 
     // Announce it, but never let a mail problem undo the exam itself.
     if (input.notifyStudents) {
@@ -193,6 +415,7 @@ export async function createExam(input: ExamInput & { notifyStudents?: boolean }
         return {
           success: true as const,
           id,
+          ...created,
           notified: {
             recipients: result.recipients,
             sent: result.sent,
@@ -206,6 +429,7 @@ export async function createExam(input: ExamInput & { notifyStudents?: boolean }
         return {
           success: true as const,
           id,
+          ...created,
           notified: {
             recipients: 0,
             sent: 0,
@@ -218,11 +442,142 @@ export async function createExam(input: ExamInput & { notifyStudents?: boolean }
       }
     }
 
-    return { success: true as const, id }
+    return { success: true as const, id, ...created }
   } catch (err) {
     console.error('createExam failed:', err)
     return { success: false as const, error: 'Failed to create exam.' }
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Copy an existing exam to other internships                                 */
+/* -------------------------------------------------------------------------- */
+
+export type CopyExamOptions = {
+  /** Default true — copies every question and MCQ option. */
+  copyQuestions?: boolean
+  /** Appended to the source name, e.g. " (Java)". */
+  nameSuffix?: string
+  /** `next` = next free order in the target internship, `same` = keep source's. */
+  orderMode?: 'next' | 'same'
+  /** Copies default to private; visibility is flipped from the table. */
+  makePublic?: boolean
+}
+
+export type CopyExamResult = {
+  success: boolean
+  created?: number
+  questionsCopied?: number
+  /** Targets that were dropped because they do not exist. */
+  skipped?: number
+  error?: string
+}
+
+export async function copyExamToInternships(
+  sourceExamId: string,
+  targetInternshipIds: string[],
+  options: CopyExamOptions = {}
+): Promise<CopyExamResult> {
+  try {
+    await requireAdmin()
+
+    const source = await getExamById(sourceExamId)
+    if (!source) {
+      return { success: false, error: 'Source exam not found.' }
+    }
+
+    const requested = [...new Set(targetInternshipIds.filter(Boolean))]
+    const targets = (
+      await resolveInternshipIds(requested)
+    ).filter((id) => id !== source.internshipId)
+
+    if (targets.length === 0) {
+      return {
+        success: false,
+        error: 'Select at least one internship other than the current one.',
+      }
+    }
+
+    const suffix = options.nameSuffix?.trim() ?? ''
+    const name = `${source.name}${suffix}`
+    if (name.length > 120) {
+      return {
+        success: false,
+        error: 'That name suffix pushes the exam name past 120 characters.',
+      }
+    }
+
+    const template =
+      options.copyQuestions === false ? [] : await loadQuestionTemplate(sourceExamId)
+
+    const rows: ExamCopyRow[] = []
+    for (const internshipId of targets) {
+      rows.push({
+        id: crypto.randomUUID(),
+        internshipId,
+        orderNo:
+          options.orderMode === 'same'
+            ? Number(source.orderNo)
+            : await getNextOrderNo(internshipId),
+        name,
+        description: source.description ?? null,
+        duration: Number(source.duration),
+        totalMarks: Number(source.totalMarks),
+        passingMarks:
+          source.passingMarks == null ? null : Number(source.passingMarks),
+        isPublic: options.makePublic ?? false,
+      })
+    }
+
+    await insertExamsWithQuestions(rows, template)
+
+    revalidatePath('/admin/exams')
+    revalidatePath(`/admin/exams/${sourceExamId}/questions`)
+
+    return {
+      success: true,
+      created: rows.length,
+      questionsCopied: template.length,
+      skipped: requested.length - targets.length,
+    }
+  } catch (err) {
+    console.error('copyExamToInternships failed:', err)
+    return { success: false, error: 'Failed to copy the exam.' }
+  }
+}
+
+/** Compact exam list used to pick a question set to clone during creation. */
+export async function getExamsForQuestionTemplate(): Promise<
+  {
+    id: string
+    name: string
+    internshipName: string
+    questionCount: number
+  }[]
+> {
+  const questionCount = sql<number>`(
+    select count(*)::int from ${examQuestions}
+    where ${examQuestions.examId} = ${exams.id}
+  )`
+
+  const rows = await db
+    .select({
+      id: exams.id,
+      name: exams.name,
+      internshipName: internships.name,
+      questionCount: questionCount.as('question_count'),
+    })
+    .from(exams)
+    .innerJoin(internships, eq(exams.internshipId, internships.id))
+    .orderBy(desc(exams.createdAt))
+    .limit(200)
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    internshipName: row.internshipName,
+    questionCount: Number(row.questionCount ?? 0),
+  }))
 }
 
 /* -------------------------------------------------------------------------- */

@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { FileSpreadsheet, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { QuestionForm } from './question-form'
+import { QuestionImportDialog } from './question-import-dialog'
 import {
   getExamInfo,
   getQuestionsForExam,
@@ -39,6 +40,7 @@ export function ExamQuestionsDrawer({ examId }: { examId: string }) {
   const [questions, setQuestions] = React.useState<QuestionRow[]>([])
   const [loading, setLoading] = React.useState(true)
   const [view, setView] = React.useState<View>({ kind: 'list' })
+  const [importOpen, setImportOpen] = React.useState(false)
 
   const refresh = React.useCallback(async () => {
     const [info, list] = await Promise.all([
@@ -107,23 +109,47 @@ export function ExamQuestionsDrawer({ examId }: { examId: string }) {
             </>
           )}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            setView({ kind: 'create' })
-          }}
-        >
-          <Plus />
-          Add Question
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setImportOpen(true)
+            }}
+          >
+            <FileSpreadsheet />
+            Import CSV / Excel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setView({ kind: 'create' })
+            }}
+          >
+            <Plus />
+            Add Question
+          </Button>
+        </div>
       </div>
+
+      <QuestionImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        examId={examId}
+        examName={exam?.name ?? 'exam'}
+        onImported={refresh}
+      />
 
       {questions.length === 0 ? (
         <div className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
-          No questions yet. Click <strong>Add Question</strong> to create one.
+          No questions yet. Click <strong>Add Question</strong> to create one, or{' '}
+          <strong>Import CSV / Excel</strong> to upload a whole set at once.
         </div>
       ) : (
         <ul className="flex flex-col gap-3">

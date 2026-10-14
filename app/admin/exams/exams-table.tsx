@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import {
   Clock,
+  Copy,
   Eye,
   EyeOff,
   FileQuestion,
@@ -55,6 +56,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ExamDrawerForm } from './exam-drawer-form'
 import { ExamQuestionsDrawer } from './exam-questions-drawer'
+import { CopyExamDialog } from './exam-copy-dialog'
 import { CheckAllEmailsButton, ExamEmailsDrawer } from './exam-emails-drawer'
 import { deleteExam, toggleExamVisibility } from './actions'
 import type { ExamRow, InternshipOption } from './constants'
@@ -224,6 +226,15 @@ export function ExamsTable({
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      <CopyExamButton
+                        examId={row.id}
+                        examName={row.name}
+                        internshipId={row.internshipId}
+                        internshipName={row.internshipName}
+                        orderNo={row.orderNo}
+                        questionCount={row.questionCount}
+                        internshipOptions={internshipOptions}
+                      />
                       <ToggleVisibilityButton
                         id={row.id}
                         isPublic={row.isPublic}
@@ -409,6 +420,67 @@ function EditExamButton({
         </div>
       </DrawerContent>
     </Drawer>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Copy button                                                                */
+/* -------------------------------------------------------------------------- */
+
+function CopyExamButton({
+  examId,
+  examName,
+  internshipId,
+  internshipName,
+  orderNo,
+  questionCount,
+  internshipOptions,
+}: {
+  examId: string
+  examName: string
+  internshipId: string
+  internshipName: string
+  orderNo: number
+  questionCount: number
+  internshipOptions: InternshipOption[]
+}) {
+  const router = useRouter()
+  const [open, setOpen] = React.useState(false)
+  // Bumped on every open so the dialog remounts with fresh defaults. Kept
+  // separate from `open` so the close animation can still play.
+  const [session, setSession] = React.useState(0)
+
+  if (internshipOptions.length <= 1) return null
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Copy exam to other internships"
+        title="Copy to other internships"
+        onClick={() => {
+          setSession((value) => value + 1)
+          setOpen(true)
+        }}
+      >
+        <Copy className="h-4 w-4" />
+      </Button>
+
+      <CopyExamDialog
+        key={session}
+        open={open}
+        onOpenChange={setOpen}
+        examId={examId}
+        examName={examName}
+        internshipId={internshipId}
+        internshipName={internshipName}
+        orderNo={orderNo}
+        questionCount={questionCount}
+        internshipOptions={internshipOptions}
+        onCopied={() => router.refresh()}
+      />
+    </>
   )
 }
 
